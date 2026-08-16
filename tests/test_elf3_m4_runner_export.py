@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import builtins
 import copy
+import importlib
 from pathlib import Path
 
 import numpy as np
@@ -178,6 +180,8 @@ def test_onnx_runtime_round_trip_meets_parity_without_skip(tmp_path):
     runner = HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu")
     path = tmp_path / "elf3_him.onnx"
     exporter = export_him_policy_onnx(runner.alg.policy, path)
+    model = onnx.load(path)
+    onnx.checker.check_model(model)
     session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
     errors = []
     for history in parity_histories():
@@ -194,3 +198,309 @@ def test_onnx_runtime_round_trip_meets_parity_without_skip(tmp_path):
 def test_export_parity_rejects_invalid_threshold(limit):
     with pytest.raises(ValueError, match="finite and non-negative"):
         verify_him_policy_onnx(None, Path("missing.onnx"), [], max_abs_error=limit)
+
+
+def test_runner_whitelists_classes_without_eval(monkeypatch):
+    monkeypatch.setattr(
+        builtins, "eval", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("eval called"))
+    )
+    runner = HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu")
+    assert runner.alg.__class__.__name__ == "HIMPPO"
+    bad = runner_cfg(use_flip=False)
+    bad["policy"]["class_name"] = "UnknownPolicy"
+    with pytest.raises(ValueError, match="UnknownPolicy|unknown"):
+        HIMOnPolicyRunner(FakeVecEnv(), bad, None, "cpu")
+
+
+def test_runner_updates_each_normalizer_once_per_returned_step():
+    env = FakeVecEnv()
+    config = runner_cfg(normalization=True, use_flip=False)
+    config["num_steps_per_env"] = 2
+    runner = HIMOnPolicyRunner(env, config, None, "cpu")
+    actor_before = runner.alg.policy.actor_obs_normalizer.count.item()
+    critic_before = runner.alg.policy.critic_obs_normalizer.count.item()
+    runner.learn(2)
+    expected_delta = 2 * config["num_steps_per_env"] * env.num_envs
+    assert runner.alg.policy.actor_obs_normalizer.count.item() == pytest.approx(
+        actor_before + expected_delta
+    )
+    assert runner.alg.policy.critic_obs_normalizer.count.item() == pytest.approx(
+        critic_before + expected_delta
+    )
+
+
+def test_checkpoint_save_uses_same_directory_temp_and_os_replace(tmp_path, monkeypatch):
+    runner = HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu")
+    runner_module = importlib.import_module(
+        "openhomie_isaaclab.him_rl.runner"
+    )
+    real_replace = runner_module.os.replace
+    replacements = []
+
+    def recording_replace(source, destination):
+        replacements.append((Path(source), Path(destination)))
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(runner_module.os, "replace", recording_replace)
+    checkpoint = tmp_path / "atomic.pt"
+    runner.save(str(checkpoint), infos={"atomic": True})
+    assert len(replacements) == 1
+    assert replacements[0][1] == checkpoint
+    source, destination = replacements[0]
+    assert source.parent == destination.parent == tmp_path
+    assert source != destination
+    assert checkpoint.exists()
+    assert not source.exists()
+
+
+def checkpoint_state(runner):
+    return {
+        "model": copy.deepcopy(runner.alg.policy.state_dict()),
+        "policy_optimizer": copy.deepcopy(runner.alg.optimizer.state_dict()),
+        "estimator_optimizer": copy.deepcopy(runner.alg.estimator_optimizer.state_dict()),
+        "learning_rate": runner.alg.learning_rate,
+        "estimator_learning_rate": runner.alg.estimator_learning_rate,
+        "follows": runner.alg.estimator_lr_follows_policy,
+        "iteration": runner.current_learning_iteration,
+    }
+
+
+def assert_checkpoint_state(runner, expected):
+    assert all(
+        torch.equal(expected["model"][key], value)
+        for key, value in runner.alg.policy.state_dict().items()
+    )
+    optimizer_state_equal(runner.alg.optimizer.state_dict(), expected["policy_optimizer"])
+    optimizer_state_equal(
+        runner.alg.estimator_optimizer.state_dict(), expected["estimator_optimizer"]
+    )
+    assert runner.alg.learning_rate == expected["learning_rate"]
+    assert runner.alg.estimator_learning_rate == expected["estimator_learning_rate"]
+    assert runner.alg.estimator_lr_follows_policy is expected["follows"]
+    assert runner.current_learning_iteration == expected["iteration"]
+
+
+def test_checkpoint_payload_contains_complete_resume_contract(tmp_path):
+    config = runner_cfg(use_flip=False)
+    config["algorithm"]["estimator_learning_rate"] = None
+    runner = HIMOnPolicyRunner(FakeVecEnv(), config, None, "cpu")
+    runner.current_learning_iteration = 4
+    checkpoint = tmp_path / "complete.pt"
+    runner.save(str(checkpoint), infos={"phase": "D"})
+    payload = torch.load(checkpoint, weights_only=False)
+    assert {
+        "schema_version",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "estimator_optimizer_state_dict",
+        "learning_rate",
+        "estimator_learning_rate",
+        "estimator_lr_follows_policy",
+        "iter",
+        "infos",
+    } <= payload.keys()
+    assert payload["estimator_lr_follows_policy"] is True
+    assert payload["infos"] == {"phase": "D"}
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "schema_version",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "estimator_optimizer_state_dict",
+        "learning_rate",
+        "estimator_learning_rate",
+        "estimator_lr_follows_policy",
+        "iter",
+    ],
+)
+def test_training_load_validates_before_mutating_runner(tmp_path, invalid):
+    runner = HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu")
+    populate_optimizer_moments(runner)
+    checkpoint = tmp_path / "valid.pt"
+    runner.save(str(checkpoint), infos={"valid": True})
+    payload = torch.load(checkpoint, weights_only=False)
+    payload.pop(invalid)
+    broken = tmp_path / f"missing_{invalid}.pt"
+    torch.save(payload, broken)
+    with torch.no_grad():
+        next(runner.alg.policy.parameters()).add_(3.0)
+    runner.current_learning_iteration = 19
+    before = checkpoint_state(runner)
+    with pytest.raises((KeyError, ValueError, RuntimeError)):
+        runner.load(str(broken), load_optimizer=True)
+    assert_checkpoint_state(runner, before)
+
+
+def test_malformed_model_load_is_transactional(tmp_path):
+    runner = HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu")
+    checkpoint = tmp_path / "valid.pt"
+    runner.save(str(checkpoint))
+    payload = torch.load(checkpoint, weights_only=False)
+    payload["model_state_dict"] = dict(payload["model_state_dict"])
+    payload["model_state_dict"].pop(next(iter(payload["model_state_dict"])))
+    broken = tmp_path / "malformed.pt"
+    torch.save(payload, broken)
+    runner.current_learning_iteration = 23
+    before = checkpoint_state(runner)
+    with pytest.raises(RuntimeError):
+        runner.load(str(broken), load_optimizer=True)
+    assert_checkpoint_state(runner, before)
+
+
+def test_inference_only_load_explicitly_skips_missing_optimizers(tmp_path):
+    runner = HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu")
+    checkpoint = tmp_path / "full.pt"
+    runner.save(str(checkpoint), infos={"mode": "inference"})
+    expected_model = copy.deepcopy(runner.alg.policy.state_dict())
+    payload = torch.load(checkpoint, weights_only=False)
+    payload.pop("optimizer_state_dict")
+    payload.pop("estimator_optimizer_state_dict")
+    inference = tmp_path / "inference.pt"
+    torch.save(payload, inference)
+    populate_optimizer_moments(runner)
+    policy_optimizer = copy.deepcopy(runner.alg.optimizer.state_dict())
+    estimator_optimizer = copy.deepcopy(runner.alg.estimator_optimizer.state_dict())
+    with torch.no_grad():
+        next(runner.alg.policy.parameters()).add_(2.0)
+    infos = runner.load(str(inference), load_optimizer=False)
+    assert infos == {"mode": "inference"}
+    assert all(
+        torch.equal(expected_model[key], value)
+        for key, value in runner.alg.policy.state_dict().items()
+    )
+    optimizer_state_equal(runner.alg.optimizer.state_dict(), policy_optimizer)
+    optimizer_state_equal(runner.alg.estimator_optimizer.state_dict(), estimator_optimizer)
+
+
+def test_exporter_is_deep_copied_eval_only_and_does_not_mutate_policy():
+    policy = HIMOnPolicyRunner(
+        FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu"
+    ).alg.policy
+    policy.train()
+    before = copy.deepcopy(policy.state_dict())
+    exporter = HIMPolicyExporter(policy)
+    assert policy.training is True
+    assert exporter.training is False
+    assert all(module.training is False for module in exporter.modules())
+    assert all(
+        torch.equal(before[key], value) for key, value in policy.state_dict().items()
+    )
+    exporter_parameter_ids = {id(parameter) for parameter in exporter.parameters()}
+    assert exporter_parameter_ids.isdisjoint({id(parameter) for parameter in policy.parameters()})
+    names = {name for name, _ in exporter.named_parameters()}
+    assert not any(
+        token in name for name in names
+        for token in ("critic", "target", "prototype", "std", "optimizer")
+    )
+
+
+@pytest.mark.parametrize("delta", [-1, 1])
+def test_exporter_derives_and_validates_policy_input_width(delta):
+    policy = HIMOnPolicyRunner(
+        FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu"
+    ).alg.policy
+    exporter = HIMPolicyExporter(policy)
+    expected_width = policy.num_one_step_obs * policy.actor_history_length
+    with pytest.raises(ValueError, match="width|dimension|history"):
+        exporter(torch.zeros(2, expected_width + delta))
+
+
+@pytest.mark.parametrize("kind", ["torchscript", "onnx"])
+def test_export_rejects_directory_output_path(tmp_path, kind):
+    policy = HIMOnPolicyRunner(
+        FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu"
+    ).alg.policy
+    function = (
+        export_him_policy_torchscript if kind == "torchscript" else export_him_policy_onnx
+    )
+    with pytest.raises((ValueError, IsADirectoryError, OSError)):
+        function(policy, tmp_path)
+
+
+def test_verifiers_reject_missing_or_invalid_serialization(tmp_path):
+    exporter = HIMPolicyExporter(
+        HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu").alg.policy
+    )
+    histories = parity_histories()
+    with pytest.raises((FileNotFoundError, ValueError, RuntimeError)):
+        verify_him_policy_torchscript(
+            exporter, tmp_path / "missing.pt", histories, max_abs_error=1.0e-7
+        )
+    invalid = tmp_path / "invalid.pt"
+    invalid.write_bytes(b"not a serialized model")
+    with pytest.raises((ValueError, RuntimeError)):
+        verify_him_policy_torchscript(
+            exporter, invalid, histories, max_abs_error=1.0e-7
+        )
+
+
+def test_failed_atomic_save_preserves_existing_checkpoint(tmp_path, monkeypatch):
+    runner = HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu")
+    runner_module = importlib.import_module("openhomie_isaaclab.him_rl.runner")
+    checkpoint = tmp_path / "existing.pt"
+    checkpoint.write_bytes(b"previous checkpoint")
+
+    def failing_replace(_source, _destination):
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(runner_module.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="replace"):
+        runner.save(str(checkpoint))
+    assert checkpoint.read_bytes() == b"previous checkpoint"
+    assert not [path for path in tmp_path.iterdir() if path != checkpoint]
+
+
+def test_checkpoint_rejects_unknown_schema_without_state_pollution(tmp_path):
+    runner = HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu")
+    checkpoint = tmp_path / "valid.pt"
+    runner.save(str(checkpoint))
+    payload = torch.load(checkpoint, weights_only=False)
+    payload["schema_version"] = payload["schema_version"] + 1000
+    broken = tmp_path / "future.pt"
+    torch.save(payload, broken)
+    runner.current_learning_iteration = 31
+    before = checkpoint_state(runner)
+    with pytest.raises((ValueError, RuntimeError), match="schema|version"):
+        runner.load(str(broken), load_optimizer=True)
+    assert_checkpoint_state(runner, before)
+
+
+@pytest.mark.parametrize("optimizer_key", ["optimizer_state_dict", "estimator_optimizer_state_dict"])
+def test_malformed_optimizer_load_is_transactional(tmp_path, optimizer_key):
+    runner = HIMOnPolicyRunner(FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu")
+    populate_optimizer_moments(runner)
+    checkpoint = tmp_path / "valid.pt"
+    runner.save(str(checkpoint))
+    payload = torch.load(checkpoint, weights_only=False)
+    payload[optimizer_key] = {"state": {}, "param_groups": []}
+    broken = tmp_path / f"malformed_{optimizer_key}.pt"
+    torch.save(payload, broken)
+    with torch.no_grad():
+        next(runner.alg.policy.parameters()).add_(4.0)
+    runner.current_learning_iteration = 37
+    before = checkpoint_state(runner)
+    with pytest.raises((ValueError, RuntimeError)):
+        runner.load(str(broken), load_optimizer=True)
+    assert_checkpoint_state(runner, before)
+
+
+def test_export_functions_preserve_live_policy_mode_device_dtype_and_state(tmp_path):
+    policy = HIMOnPolicyRunner(
+        FakeVecEnv(), runner_cfg(use_flip=False), None, "cpu"
+    ).alg.policy
+    policy.train()
+    before = copy.deepcopy(policy.state_dict())
+    mode_before = policy.training
+    devices_before = {parameter.device for parameter in policy.parameters()}
+    dtypes_before = {parameter.dtype for parameter in policy.parameters()}
+    export_him_policy_torchscript(policy, tmp_path / "policy.pt")
+    export_him_policy_onnx(policy, tmp_path / "policy.onnx")
+    assert policy.training is mode_before
+    assert {parameter.device for parameter in policy.parameters()} == devices_before
+    assert {parameter.dtype for parameter in policy.parameters()} == dtypes_before
+    assert all(
+        torch.equal(before[key], value) for key, value in policy.state_dict().items()
+    )
