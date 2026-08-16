@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import ast
 import importlib
+import importlib.util
+import math
 import os
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import gymnasium as gym
 import pytest
@@ -408,3 +411,50 @@ def test_checkpoint_and_run_paths_are_explicit_and_exclusive(tmp_path):
         ]
         with pytest.raises((FileExistsError, ValueError)):
             parse_request(values)
+
+
+def test_launcher_closes_and_never_passes_when_result_serialization_fails(
+    monkeypatch, capsys
+):
+    require_batch_a()
+    spec = importlib.util.spec_from_file_location("_elf3_m5_cli_probe", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    class FakeApp:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    app = FakeApp()
+
+    class FakeLauncher:
+        def __init__(self, **kwargs):
+            self.app = app
+
+    isaaclab = ModuleType("isaaclab")
+    isaaclab.__path__ = []
+    isaaclab_app = ModuleType("isaaclab.app")
+    isaaclab_app.AppLauncher = FakeLauncher
+    fake_rl = ModuleType("isaaclab_rl")
+
+    import openhomie_isaaclab.workflows as workflows
+
+    request = SimpleNamespace(headless=True, device="cpu")
+    runtime = SimpleNamespace(
+        run=lambda request: {"status": "PASS", "nonfinite": math.nan}
+    )
+    monkeypatch.setattr(cli, "parse_request", lambda argv: request)
+    monkeypatch.setattr(workflows, "elf3_sim", runtime, raising=False)
+    monkeypatch.setitem(sys.modules, "isaaclab", isaaclab)
+    monkeypatch.setitem(sys.modules, "isaaclab.app", isaaclab_app)
+    monkeypatch.setitem(sys.modules, "isaaclab_rl", fake_rl)
+
+    assert cli.main([]) == 1
+    assert app.closed is True
+    captured = capsys.readouterr()
+    assert "M5_HEADLESS_PASS" not in captured.out
+    assert "M5_HEADLESS_FAIL" in captured.out
+    assert "M5_INTERNAL_EXIT_CODE=1" in captured.out

@@ -110,6 +110,28 @@ def behavior():
     return {"rows": rows}
 
 
+def _updated(payload, **changes):
+    payload.update(changes)
+    return payload
+
+
+def _without(payload, key):
+    payload.pop(key)
+    return payload
+
+
+def write_events(path, values):
+    from torch.utils.tensorboard import SummaryWriter
+
+    writer = SummaryWriter(log_dir=path)
+    try:
+        for tag, points in values.items():
+            for step, value in enumerate(points):
+                writer.add_scalar(tag, value, step)
+    finally:
+        writer.close()
+
+
 def test_hash_changes_with_content(tmp_path):
     m = api()
     p = tmp_path / "x"
@@ -212,16 +234,29 @@ def test_classify_absent_incomplete_pass_and_fail(tmp_path):
         (lambda p: p, True, True),
         (lambda p: p, False, True),
         (lambda p: None, False, False),
-        (lambda p: p.pop("model_state_dict"), False, False),
-        (lambda p: p.update(schema_version=2), False, False),
-        (lambda p: p.update(iter=True), False, False),
-        (lambda p: p.update(iter=-1), False, False),
-        (lambda p: p.update(learning_rate=math.nan), False, False),
-        (lambda p: p.update(estimator_learning_rate=math.inf), False, False),
-        (lambda p: p.pop("optimizer_state_dict"), True, False),
-        (lambda p: p.pop("estimator_optimizer_state_dict"), True, False),
-        (lambda p: p.pop("optimizer_state_dict"), False, True),
-        (lambda p: p.pop("estimator_optimizer_state_dict"), False, True),
+        (lambda p: _without(p, "model_state_dict"), False, False),
+        (lambda p: _updated(p, schema_version=2), False, False),
+        (lambda p: _updated(p, iter=True), False, False),
+        (lambda p: _updated(p, iter=-1), False, False),
+        (lambda p: _updated(p, learning_rate=math.nan), False, False),
+        (lambda p: _updated(p, estimator_learning_rate=math.inf), False, False),
+        (lambda p: _without(p, "optimizer_state_dict"), True, False),
+        (lambda p: _without(p, "estimator_optimizer_state_dict"), True, False),
+        (lambda p: _without(p, "optimizer_state_dict"), False, True),
+        (lambda p: _without(p, "estimator_optimizer_state_dict"), False, True),
+        (lambda p: _updated(p, model_state_dict=None), False, False),
+        (lambda p: _updated(p, optimizer_state_dict=None), True, False),
+        (
+            lambda p: _updated(p, estimator_optimizer_state_dict=None),
+            True,
+            False,
+        ),
+        (lambda p: _updated(p, optimizer_state_dict=None), False, False),
+        (
+            lambda p: _updated(p, estimator_optimizer_state_dict=None),
+            False,
+            False,
+        ),
     ],
 )
 def test_checkpoint_validation(mutation, resume, valid):
@@ -230,7 +265,7 @@ def test_checkpoint_validation(mutation, resume, valid):
     candidate = mutation(payload)
     if valid:
         assert (
-            m.validate_checkpoint_payload(payload, require_optimizers=resume) == 7
+            m.validate_checkpoint_payload(candidate, require_optimizers=resume) == 7
         )
     else:
         with pytest.raises((KeyError, TypeError, ValueError)):
@@ -409,3 +444,35 @@ def test_behavior_accepts_four_scenarios_and_three_seeds():
         "passed": True,
         "reasons": [],
     }
+
+
+def test_tensorboard_reader_returns_ordered_finite_required_series(tmp_path):
+    module = api()
+    with pytest.raises(ValueError):
+        module.read_tensorboard_scalars(
+            tmp_path, ("reward", "loss"), minimum_points=0
+        )
+    write_events(tmp_path, {"reward": [1.0, 2.0], "loss": [3.0, 4.0]})
+    assert module.read_tensorboard_scalars(
+        tmp_path, ("reward", "loss"), minimum_points=2
+    ) == {"reward": [1.0, 2.0], "loss": [3.0, 4.0]}
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"reward": [1.0, 2.0]},
+        {"reward": [1.0, 2.0], "loss": [3.0]},
+        {"reward": [1.0, math.nan], "loss": [3.0, 4.0]},
+        {"reward": [1.0, math.inf], "loss": [3.0, 4.0]},
+    ],
+)
+def test_tensorboard_reader_rejects_missing_short_or_nonfinite_series(
+    tmp_path, values
+):
+    module = api()
+    write_events(tmp_path, values)
+    with pytest.raises((KeyError, TypeError, ValueError)):
+        module.read_tensorboard_scalars(
+            tmp_path, ("reward", "loss"), minimum_points=2
+        )
