@@ -222,12 +222,34 @@ latent. The critic receives the complete normalized critic observation. The
 Gaussian action distribution follows the pinned rsl-rl scalar standard
 deviation semantics and rejects nonpositive standard deviation.
 
-When actor/critic observation normalization is enabled, use rsl-rl's
-`EmpiricalNormalization` modules and update them once per environment step
-through the algorithm lifecycle. Estimator targets and inference use the same
-normalization state as training. Normalizer buffers are part of the policy
-state dict and therefore part of checkpoint and export parity. M4 defaults to
-the approved configuration rather than silently enabling normalization.
+Rollout storage keeps raw observations. When normalization is enabled, use
+rsl-rl's `EmpiricalNormalization` modules and update each normalizer exactly
+once from the observations returned by each `env.step`, before storing the
+transition. Reset rows in those returned observations participate in the
+ordinary update; the separate pre-reset `terminal_critic_obs` snapshot never
+causes another statistics update. During minibatch evaluation, the current
+collected statistics are applied consistently to all stored raw tensors.
+
+The actor-history normalizer has the full history width. Its complete output
+feeds the estimator source encoder, and its final one-step slice feeds the
+actor. The estimator next-state target combines two normalized regions: its
+actor-frame region uses the final one-step mean and standard-deviation slice
+from the actor-history normalizer, and its true-base-velocity region uses the
+critic normalizer's critic-tail mean and standard-deviation slice. The three
+leading velocity commands are discarded only after the next actor frame has
+been normalized. This rule applies equally to continuing next observations
+and substituted terminal snapshots. It prevents actor and estimator source
+features from using one coordinate system while the target silently uses
+another.
+
+The critic value path applies the critic normalizer to the complete critic
+observation. Inference and export apply the actor-history normalizer before
+estimator encoding and actor latest-frame extraction; they do not need the
+critic normalizer because the target and value paths are training-only.
+Normalizer buffers are part of the policy state dict and therefore part of
+checkpoint and export parity. M4 defaults to the approved disabled setting,
+but tests exercise the enabled behavior so the default cannot hide an
+undefined normalization contract.
 
 Parameter ownership is exact and disjoint:
 
