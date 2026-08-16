@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 
 import pytest
 import torch
@@ -95,6 +96,11 @@ def test_storage_minibatch_keeps_exact_stock_field_order(monkeypatch):
     assert torch.equal(batch[11], storage.estimator_masks.flatten(0, 1))
 
 
+def test_storage_constructor_uses_approved_critic_obs_shape_name():
+    parameters = inspect.signature(HIMRolloutStorage.__init__).parameters
+    assert "critic_obs_shape" in parameters
+    assert "critic_shape" not in parameters
+
 
 def test_single_branch_gae_exactly_matches_rsl_storage():
     torch.manual_seed(6)
@@ -106,6 +112,7 @@ def test_single_branch_gae_exactly_matches_rsl_storage():
     him.dones.copy_(torch.randint(0, 2, him.dones.shape, dtype=torch.uint8))
     stock.values.copy_(him.values); stock.rewards.copy_(him.rewards); stock.dones.copy_(him.dones)
     last = torch.randn(3, 1)
+    him.step = him.num_transitions_per_env
     him.compute_returns(last, 0.99, 0.95)
     stock.compute_returns(last, 0.99, 0.95)
     assert torch.equal(him.returns, stock.returns)
@@ -132,6 +139,7 @@ def test_two_branches_compute_independent_gae_without_leakage():
         stock.values.copy_(values[:, branch]); stock.rewards.copy_(rewards[:, branch]); stock.dones.copy_(dones[:, branch])
         stock.compute_returns(last[branch], 0.99, 0.95, normalize_advantage=False)
         references.append(stock)
+    storage.step = storage.num_transitions_per_env
     storage.compute_returns(last, 0.99, 0.95, normalize_advantage=False)
     actual_returns = storage.returns.reshape(steps, branches, envs, 1)
     for branch, stock in enumerate(references):

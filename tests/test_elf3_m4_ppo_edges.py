@@ -26,10 +26,11 @@ def assert_nested_equal(actual, expected):
         assert actual == expected
 
 
-def make_ready_algorithm(envs=2):
+def make_ready_algorithm(envs=2, **kwargs):
     policy = make_policy(envs)
+    kwargs.setdefault("schedule", "fixed")
     algorithm = HIMPPO(
-        policy, use_flip=False, num_learning_epochs=1, num_mini_batches=1, schedule="fixed"
+        policy, use_flip=False, num_learning_epochs=1, num_mini_batches=1, **kwargs
     )
     obs = make_obs(envs)
     algorithm.init_storage("rl", envs, 1, obs, [C.NUM_POLICY_ACTIONS])
@@ -229,3 +230,78 @@ def test_nonfinite_gradient_norm_steps_neither_optimizer(monkeypatch, nonfinite_
     assert_nested_equal(policy.state_dict(), before)
     assert algorithm.optimizer.state_dict()["state"] == {}
     assert algorithm.estimator_optimizer.state_dict()["state"] == {}
+
+
+def test_mirrored_timeout_bootstrap_uses_each_branch_value():
+    envs = 2
+    policy = make_policy(envs)
+    algorithm = HIMPPO(policy, use_flip=True, mirror=mirror_spec(identity=True))
+    obs = make_obs(envs)
+    algorithm.init_storage("rl", envs, 1, obs, [C.NUM_POLICY_ACTIONS])
+    algorithm.act(obs)
+    algorithm.transition.values.fill_(2.0)
+    algorithm.transition_sym.values.fill_(5.0)
+    rewards = torch.ones(envs)
+    algorithm.process_env_step(
+        make_obs(envs),
+        rewards,
+        torch.zeros(envs, dtype=torch.bool),
+        {"time_outs": torch.ones(envs, dtype=torch.bool)},
+    )
+    stored = algorithm.storage.rewards.reshape(1, 2, envs, 1)[0, ..., 0]
+    assert torch.allclose(stored[0], rewards + algorithm.gamma * 2.0)
+    assert torch.allclose(stored[1], rewards + algorithm.gamma * 5.0)
+
+
+def test_single_symmetry_scale_is_accepted_and_both_losses_are_reported():
+    envs = 2
+    policy = make_policy(envs)
+    algorithm = HIMPPO(
+        policy,
+        use_flip=True,
+        mirror=mirror_spec(identity=True),
+        symmetry_scale=0.25,
+        num_learning_epochs=1,
+        num_mini_batches=1,
+        schedule="fixed",
+    )
+    obs = make_obs(envs)
+    algorithm.init_storage("rl", envs, 1, obs, [C.NUM_POLICY_ACTIONS])
+    algorithm.act(obs)
+    next_obs = make_obs(envs)
+    algorithm.process_env_step(
+        next_obs, torch.ones(envs), torch.zeros(envs, dtype=torch.bool), {}
+    )
+    algorithm.compute_returns(next_obs)
+    losses = algorithm.update()
+    assert algorithm.symmetry_scale == 0.25
+    assert "actor_symmetry" in losses
+    assert "critic_symmetry" in losses
+
+
+def test_adaptive_lr_is_rolled_back_with_failed_atomic_update(monkeypatch):
+    policy, algorithm = make_ready_algorithm(
+        learning_rate=3.0e-3,
+        estimator_learning_rate=None,
+        schedule="adaptive",
+    )
+    algorithm.storage.mu.fill_(100.0)
+    model_before = copy.deepcopy(policy.state_dict())
+    policy_optimizer_before = copy.deepcopy(algorithm.optimizer.state_dict())
+    estimator_optimizer_before = copy.deepcopy(algorithm.estimator_optimizer.state_dict())
+    learning_rate_before = algorithm.learning_rate
+    estimator_learning_rate_before = algorithm.estimator_learning_rate
+    original_step = algorithm.optimizer.step
+
+    def failing_step(*args, **kwargs):
+        original_step(*args, **kwargs)
+        raise RuntimeError("injected optimizer failure")
+
+    monkeypatch.setattr(algorithm.optimizer, "step", failing_step)
+    with pytest.raises((NonFiniteTrainingError, RuntimeError)):
+        algorithm.update()
+    assert algorithm.learning_rate == learning_rate_before
+    assert algorithm.estimator_learning_rate == estimator_learning_rate_before
+    assert_nested_equal(policy.state_dict(), model_before)
+    assert_nested_equal(algorithm.optimizer.state_dict(), policy_optimizer_before)
+    assert_nested_equal(algorithm.estimator_optimizer.state_dict(), estimator_optimizer_before)
