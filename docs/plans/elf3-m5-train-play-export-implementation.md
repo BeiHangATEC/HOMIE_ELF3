@@ -2,7 +2,7 @@
 
 Date: 2026-08-17
 Design: `docs/plans/elf3-m5-train-play-export-design.md`
-Status: Approved for implementation under the HANDOFF blanket authorization
+Status: Batch A/B accepted; Batch C1 implementation contract approved and frozen
 
 ## 1. Ownership and common gates
 
@@ -16,9 +16,11 @@ Status: Approved for implementation under the HANDOFF blanket authorization
 - Commits use `Qingwei Ben <78202424+Elgce@users.noreply.github.com>`.
 
 Every batch runs `git diff --check`, verifies the staged whitelist, and
-records exact commands, exit codes, counts, warnings, and failures. M3a
-environment files, all eight generic HIM modules, constants, assets, rewards,
-curriculum, and upstream paths are hashed before and after each batch.
+records exact commands, exit codes, counts, warnings, and failures. For C1,
+the four explicitly whitelisted production files are expected to change and
+all other environment/HIM files, constants, assets, rewards, curriculum,
+training defaults, and upstream paths are hashed before and after. After C1
+acceptance, the four C1 hashes are frozen for C2.
 
 The runtime must resolve `isaaclab` and `isaaclab.app` inside the
 IsaacLab-v2.3.2 checkout. The expected package metadata mapping is
@@ -248,43 +250,135 @@ Suggested production commit:
 feat: integrate ELF3 headless training workflow
 ```
 
-## 4. Batch C: convergence and deterministic behavior evidence
+Batch B is archivally accepted at commit
+`71c53f79c73873f6f3ee9da097dab0186ecd1b58` from
+`/home/user/wang-sm/OpenHomie_m5b_71c53f7_20260817`; its four child processes,
+checkpoint lineage, immutable play, both exports, and TensorBoard inventory
+passed independent verification.
 
-### 4.1 Evidence test ownership
+## 4. Batch C1: training instrumentation and scenario evaluation
+
+### 4.1 C1 test ownership
 
 The planning agent creates and commits only:
 
 ```text
-tests/test_elf3_m5_convergence_evidence.py
+tests/test_elf3_m5_training_instrumentation.py
 ```
 
-The test reads exactly one explicit absolute run directory from
-`OPENHOMIE_M5_RUN`. An absent variable or nonexistent path fails; it never
-skips.
-
-Fixtures cover passing evidence and failures for thresholds, missing tags,
-foreign run identity, NaN, infinity, truncation, transition-budget mismatch,
-checkpoint mismatch, artifact hash mismatch, nondeterminism, export parity,
-and each behavior scenario.
+It freezes only the minimum C1 production contract: the timeout scalar tag,
+unit and range; unchanged boolean done boundary; opt-in fixed commands that
+survive reset and periodic resampling; exact scenario-to-command/mode mapping;
+finite shape-checked evaluation observables; scenario CLI validation; fixed
+commands installed before the first actor observation; and no evaluation
+branch in rewards, physics, terminations, or the default training path.
 
 Suggested commit:
 
 ```text
-test: require M5 convergence and behavior evidence
+test: define M5 training instrumentation contract
 ```
 
-### 4.2 Red evidence command
+### 4.2 C1 red command
 
 ```bash
-OPENHOMIE_M5_RUN=/absolute/nonexistent \
-  /home/user/miniconda3/envs/homie/bin/python -m pytest -q \
-  tests/test_elf3_m5_convergence_evidence.py
+/home/user/miniconda3/envs/homie/bin/python -m pytest -q \
+  tests/test_elf3_m5_training_instrumentation.py
 ```
 
-The failure must explicitly report missing M5 run evidence. It must not be a
-skip or collection error.
+The test must collect normally and fail only because the four whitelisted
+production files do not yet expose the frozen C1 contract. Fixture,
+dependency, syntax, collection, or unrelated baseline failures are test
+defects and must be corrected before production.
 
-### 4.3 Resource preflight
+### 4.3 C1 production
+
+The execution agent may modify only:
+
+```text
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/him_rl/runner.py
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/tasks/locomotion/elf3/elf3_homie_env.py
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/workflows/elf3_run.py
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/workflows/elf3_sim.py
+```
+
+`runner.py` writes `Episode_Termination/time_out` exactly once per completed
+iteration. Its value is the rollout transition fraction
+`sum(bool time_outs) / (num_envs * num_steps_per_env)`, finite in `[0, 1]`.
+It does not replace or recast the wrapped boolean `dones` passed to HIMPPO.
+
+`elf3_run.py` adds immutable `EVALUATION_SCENARIOS` definitions and play-only
+`scenario`/`steps` request fields. Ordinary play remains 100 steps and rejects
+`--steps`; scenario play requires `--scenario` and exactly `--steps 1000`.
+The exact mapping is:
+
+```text
+stand:   HIGH_STAND (1), (0.0, 0.0, 0.0, default_height)
+forward: WALK       (0), (0.5, 0.0, 0.0, default_height)
+turn:    WALK       (0), (0.0, 0.0, 0.5, default_height)
+crouch:  CROUCH_LOW (2), (0.0, 0.0, 0.0, 0.80)
+```
+
+`elf3_homie_env.py` exposes `set_evaluation_command(command, mode)` and
+`get_evaluation_observables()`. The setter maps the four command values to
+internal columns 0, 1, 2, and 4 while column 3 stays zero. Fixed commands
+bypass random reset-time and periodic resampling only after the setter is
+called. The default is disabled, so training and ordinary play are unchanged.
+The observable mapping has exactly:
+
+```text
+command             [num_envs, 4]
+root_lin_vel_b       [num_envs, 3]
+root_ang_vel_b       [num_envs, 3]
+roll_pitch           [num_envs, 2]
+tracking_height      [num_envs]
+```
+
+Every value is finite. `tracking_height` is exactly
+`max(root_z - left_foot_z, root_z - right_foot_z) + ankle_sole_distance`, the
+same actual quantity used by `tracking_base_height`, never raw world root Z.
+
+`elf3_sim.py` installs the fixed command immediately after raw environment
+creation and before wrapping or runner construction. Only scenario play uses
+that path. It runs exactly 1000 steps with 16 environments, tracks credit per
+environment until its first non-timeout termination, excludes later automatic
+reset data, and records the immutable command, checkpoint, finite, termination,
+timeout, survival, metric, action-hash, and trajectory-hash evidence.
+
+The thin `isaaclab_ext/scripts/elf3_him.py` remains unchanged.
+
+### 4.4 C1 green gates
+
+```bash
+/home/user/miniconda3/envs/homie/bin/python -m pytest -q \
+  tests/test_elf3_m5_training_instrumentation.py
+
+/home/user/miniconda3/envs/homie/bin/python -m pytest -q tests
+git diff --check
+```
+
+After executor self-test, the planning agent independently repeats the gates,
+audits the four-file production whitelist, verifies all frozen hashes, and
+runs one real 16-environment scenario play before C1 acceptance.
+
+## 5. Batch C2: convergence and deterministic behavior evidence
+
+### 5.1 Evidence ownership after C1 acceptance
+
+Only after C1 independent acceptance, the planning agent creates and commits:
+
+```text
+tests/test_elf3_m5_convergence_evidence.py
+isaaclab_ext/scripts/check_elf3_m5_convergence.py
+```
+
+Fixture tests do not depend on ambient evidence or an environment variable.
+The frozen harness accepts one explicit `--evidence-root`; a missing or
+malformed root fails nonzero without skip/xfail. The evidence root contains
+one immutable training run, one exact-checkpoint export run, twelve scenario
+runs, and one aggregate result referencing every manifest and result hash.
+
+### 5.2 Resource preflight
 
 Before the canonical run, record:
 
@@ -297,7 +391,7 @@ Before the canonical run, record:
 Insufficient resources fail before AppLauncher and leave explicit failure
 evidence.
 
-### 4.4 Canonical from-scratch run
+### 5.3 Canonical from-scratch run
 
 ```bash
 python isaaclab_ext/scripts/elf3_him.py train \
@@ -309,16 +403,19 @@ python isaaclab_ext/scripts/elf3_him.py train \
   --run-dir /absolute/new/run-directory
 ```
 
-The fixed budget is
-`4096 * 2000 * cfg.num_steps_per_env` transitions. Favorable early stopping
+The fixed budget is exactly `4096 * 2000 * 50 = 409,600,000` transitions.
+Favorable early stopping
 is forbidden. A resource-backed reduction in environment count increases
 iterations to at least
 `ceil(canonical_budget / (actual_num_envs * cfg.num_steps_per_env))`;
 it never reduces total transitions or thresholds.
 
-### 4.5 Convergence gate
+### 5.4 Convergence gate
 
-The official TensorBoard reader parses the explicit run. Acceptance requires:
+The official `EventAccumulator` parses the explicit run. Required tags are
+`Train/mean_episode_length`, `Train/mean_reward`, all seven HIM loss tags plus
+`Loss/learning_rate`, `Perf/total_fps`, and the new
+`Episode_Termination/time_out`. Acceptance requires:
 
 - final 100 mean episode-length points average above 300;
 - final average at least four times the first 100-point average;
@@ -329,9 +426,11 @@ The official TensorBoard reader parses the explicit run. Acceptance requires:
 
 Historical HOMIE data and short M5 headless runs cannot satisfy this gate.
 
-### 4.6 Exact checkpoint export
+### 5.5 Exact checkpoint export
 
-Use the canonical run's exact final checkpoint:
+Read the canonical training `result.json`; require `status == "PASS"`, final
+iteration 2000, a regular final checkpoint file, and a SHA-256 matching the
+result. Never glob or select `latest`. Use that exact path:
 
 ```bash
 python isaaclab_ext/scripts/elf3_him.py export \
@@ -341,32 +440,42 @@ python isaaclab_ext/scripts/elf3_him.py export \
 ```
 
 Both exports are loaded independently. TorchScript error must be at most
-`1e-7`; ONNX Runtime error must be at most `1e-5`.
+`1e-7`; ONNX Runtime error must be at most `1e-5`. The oracle is the live
+`runner.get_inference_policy(device="cpu")`; batches 1 and 4 run in fresh
+TorchScript and ONNX subprocesses, with ONNX checker and exactly
+`CPUExecutionProvider`.
 
-### 4.7 Deterministic play matrix
+### 5.6 Deterministic play matrix
 
 Run stand, forward, turn, and crouch scenarios for seeds 42, 43, and 44,
-1000 policy steps each. Each invocation uses the same exact final checkpoint
-and a new evidence directory. The commands and scenario overrides are
-recorded verbatim in their manifests.
+1000 policy steps and 16 environments each. Every invocation uses the same
+exact final checkpoint and a new evidence directory. The resolved numeric
+command, mode, seed, steps, and `num_envs=16` are recorded verbatim.
 
 Acceptance uses the fixed thresholds from the design. Every seed must be
-finite and meet its survival requirement. Per-seed and aggregate trajectory
-hashes and metrics are required. Videos do not replace numeric evidence.
+finite and meet its survival requirement, computed as
+`credited_env_steps / (16 * 1000)`. Other scenario metrics are the equal-weight
+mean of the three per-seed values. Per-seed and aggregate action, trajectory,
+manifest, and result hashes are required. Videos do not replace numeric
+evidence.
 
-### 4.8 Evidence green command
+### 5.7 Evidence green command
 
 ```bash
-OPENHOMIE_M5_RUN=/absolute/completed/run \
-  /home/user/miniconda3/envs/homie/bin/python -m pytest -q \
+/home/user/miniconda3/envs/homie/bin/python -m pytest -q \
   tests/test_elf3_m5_convergence_evidence.py
+
+/home/user/miniconda3/envs/homie/bin/python \
+  isaaclab_ext/scripts/check_elf3_m5_convergence.py \
+  --evidence-root /absolute/completed/evidence-root
 
 /home/user/miniconda3/envs/homie/bin/python -m pytest -q tests
 ```
 
-Batch C changes no production code.
+Batch C2 changes no production code. Missing, duplicate, foreign, truncated,
+non-finite, hash-mismatched, or threshold-failing evidence is a hard failure.
 
-## 5. Final M5 audit
+## 6. Final M5 audit
 
 The planning agent independently:
 

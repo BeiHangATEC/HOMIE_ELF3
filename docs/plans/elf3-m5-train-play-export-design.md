@@ -1,7 +1,7 @@
 # ELF3 M5 Train, Play, Export, and Learning Evidence Design
 
 Date: 2026-08-17
-Status: Approved under the HANDOFF blanket authorization
+Status: Batch A and Batch B accepted; Batch C1/C2 contract approved and frozen
 Prerequisites: accepted M3a environment core and M4 HIM PPO stack
 
 ## 1. Objective
@@ -11,11 +11,13 @@ auditable train, play, and export workflows, then evaluates a newly trained
 OpenHomie policy with quantitative learning and deterministic behavior
 evidence.
 
-M5 does not change robot dimensions, physics, rewards, M3a environment
-behavior, the eight generic HIM modules, or upstream files. A successful
-process launch, a finite random rollout, a short finite training run, video,
-or historical results from the reference HOMIE repository do not establish
-learning convergence.
+M5 does not change robot dimensions, physics, rewards, terminations, training
+defaults, or upstream files. Batch C1 makes the minimum production changes
+needed to observe timeout activity and execute fixed evaluation scenarios; the
+scenario-only branch must not change ordinary play or training behavior. A
+successful process launch, a finite random rollout, a short finite training
+run, video, or historical results from the reference HOMIE repository do not
+establish learning convergence.
 
 ## 2. Runtime authority and environment evidence
 
@@ -75,6 +77,7 @@ It does not copy the historical 5000-line orchestration layer.
 - configuration and artifact hashing;
 - checkpoint lineage checks;
 - TensorBoard curve parsing;
+- the immutable four-scenario evaluation catalog and CLI validation;
 - convergence and behavior acceptance calculations.
 
 All structured files use structured JSON APIs, reject NaN and infinity, and
@@ -89,6 +92,7 @@ contain recursively JSON-safe values.
 - `RslRlVecEnvWrapper` as the final environment wrapper;
 - `HIMOnPolicyRunner` construction;
 - train, resume, deterministic play, and export execution;
+- scenario-only fixed-command installation and evaluation snapshots;
 - finite-tensor and iteration-continuity checks;
 - simulation-backed evidence collection.
 
@@ -117,6 +121,11 @@ Common explicit inputs include `--run-dir`, `--device`, `--seed`, and
   checkpoint selection are rejected.
 - Resume always creates a new run directory and never mutates its parent run.
 - An existing, aliased, symlinked, or non-exclusive output path is rejected.
+- Ordinary `play` retains the accepted Batch B behavior: 100 steps, command
+  resampling enabled, and no scenario evaluation fields.
+- Scenario `play` requires exactly one of `stand`, `forward`, `turn`, or
+  `crouch` plus `--steps 1000`. `--scenario` and `--steps` are rejected by
+  `train` and `export`, and either field without the other is rejected.
 
 Device, seed, environment count, and iteration count are validated before
 launch. Invalid input exits nonzero without starting Isaac Sim.
@@ -199,10 +208,13 @@ Play and export never modify checkpoint or parent-run evidence.
 
 ## 8. Deterministic inference and export
 
-Play uses only `get_inference_policy()` under inference mode. A fixed
-observation is evaluated twice on the same device; both action tensors must
-be finite, shape `[num_envs, 12]`, and bitwise identical. The action hash is
-recorded.
+Ordinary play uses only `get_inference_policy()` under inference mode. A fixed
+observation is evaluated twice on the same device; both action tensors must be
+finite, shape `[num_envs, 12]`, and bitwise identical. The action hash is
+recorded. Scenario play uses the same inference path but runs exactly 1000
+steps with 16 environments, installs one fixed command before the first actor
+observation, and records the evaluation observables and trajectory evidence
+defined below.
 
 Export creates `policy.ts` and `policy.onnx` from the same explicit
 checkpoint. Fresh TorchScript and ONNX Runtime processes compare batches 1
@@ -243,10 +255,21 @@ The current GPU evidence is expected to pass. If free memory drops below the
 threshold, the harness prints `M5_HEADLESS_FAIL` and exits nonzero before
 launch; it is never skipped or reported as a pass.
 
+Batch B is archivally accepted at commit
+`71c53f79c73873f6f3ee9da097dab0186ecd1b58` from the immutable evidence root
+`/home/user/wang-sm/OpenHomie_m5b_71c53f7_20260817`. Its train, resume, play,
+TorchScript, ONNX, child-log, and TensorBoard checks all passed. This freezes
+the Batch B interfaces while permitting the explicit Batch C1 extensions.
+
 ### Batch C: convergence and behavior
 
-Batch C adds no production code. It consumes one explicit, from-scratch
-OpenHomie run and requires complete learning and behavior evidence.
+Batch C is split into two test-first slices. C1 adds only the production
+instrumentation and scenario-play surface absent from Batch B: one timeout
+scalar, an opt-in fixed evaluation command, finite metric snapshots, scenario
+CLI fields, and immutable per-scenario evidence. After independent C1
+acceptance, C2 adds planner-owned convergence tests and an acceptance harness,
+then consumes one explicit, from-scratch OpenHomie run; C2 changes no
+production.
 
 The canonical training budget is:
 
@@ -257,10 +280,10 @@ python isaaclab_ext/scripts/elf3_him.py train \
   --run-dir /absolute/new/run-directory
 ```
 
-This is
-`4096 * 2000 * cfg.num_steps_per_env` training transitions. There is no
-favorable early stop. If measured resources require fewer environments, the
-run records the evidence and justification and uses at least:
+With frozen `cfg.num_steps_per_env == 50`, this is exactly
+`4096 * 2000 * 50 = 409,600,000` training transitions. There is no favorable
+early stop. If measured resources require fewer environments, the run records
+the evidence and justification and uses:
 
 ```text
 ceil(canonical_transition_budget /
@@ -273,19 +296,38 @@ budget.
 
 ## 10. Learning convergence acceptance
 
-TensorBoard data is parsed from the explicit M5 run with the official event
-reader. Required scalar series include episode length, timeout termination,
-reward, PPO losses, estimator losses, learning rates, entropy, and
-throughput. Missing, truncated, foreign-run, hash-mismatched, NaN, or infinite
-series fail.
+TensorBoard data is parsed from the explicit M5 run with the official
+`EventAccumulator`. The required tags use the actual rsl-rl names:
+
+```text
+Train/mean_episode_length
+Train/mean_reward
+Loss/value_function
+Loss/surrogate
+Loss/entropy
+Loss/estimator_velocity
+Loss/estimator_swap
+Loss/actor_symmetry
+Loss/critic_symmetry
+Loss/learning_rate
+Perf/total_fps
+Episode_Termination/time_out
+```
+
+`Episode_Termination/time_out` has unit `rollout_transition_fraction`. It is
+written exactly once per completed training iteration as
+`sum(bool time_outs) / (num_envs * num_steps_per_env)` over that iteration's
+rollout, is finite in `[0, 1]`, and resets for the next iteration. The existing
+wrapped `dones` conversion to boolean and the separate boolean `time_outs`
+tensor remain unchanged. Missing, truncated, foreign-run, hash-mismatched,
+NaN, or infinite series fail.
 
 The fixed acceptance is:
 
 - final 100 recorded `mean_episode_length` points average above 300;
 - that final average is at least four times the first 100-point average;
-- among the final 100 timeout scalar points, at least one and at least five
-  points are strictly positive;
-- every required scalar is finite;
+- among the final 100 timeout scalar points, at least 5 are strictly positive;
+- every required scalar series is complete and finite;
 - the run consumed the complete transition budget.
 
 The timeout rule is a fraction of recorded scalar points, not a claimed
@@ -293,21 +335,46 @@ fraction of episodes. Historical HOMIE curves cannot satisfy this gate.
 
 ## 11. Deterministic behavior acceptance
 
-The exact final checkpoint is evaluated for 1000 policy steps with seeds 42,
-43, and 44 in each scenario. For each evaluation environment, credit stops at
-the first non-timeout termination; automatic reset steps do not count toward
-survival. Errors are computed over credited finite steps.
+The exact final checkpoint is evaluated in twelve separate 16-environment
+processes: 1000 policy steps with seeds 42, 43, and 44 in each scenario. The
+fixed command layout is `(vx, vy, yaw_rate, height)`; internal command column 3
+remains zero and height is written to column 4. Stand uses mode
+`HIGH_STAND (1)`, forward and turn use `WALK (0)`, and crouch uses
+`CROUCH_LOW (2)`. The default height is the current stage's `walk_height`,
+resolved to a numeric value and recorded before the first step.
+
+Fixed commands bypass command curriculum and reset-time and periodic random
+resampling only while scenario play is active. Training and ordinary play
+retain the accepted resampling path. Credit is tracked per environment and
+stops at that environment's first non-timeout termination; automatically reset
+states after that point are never credited. Errors use only credited finite
+environment steps.
 
 | Scenario | Command | Required evidence |
 |---|---|---|
-| Stand | zero velocity, default height | survival >= 0.95, height MAE <= 0.08 m, roll/pitch RMS <= 0.20 rad |
-| Forward | vx = 0.5 m/s | survival >= 0.90, vx MAE <= 0.20 m/s, height MAE <= 0.10 m |
-| Turn | yaw = 0.5 rad/s | survival >= 0.90, yaw-rate MAE <= 0.25 rad/s, height MAE <= 0.10 m |
-| Crouch | zero velocity, height = 0.80 m | survival >= 0.90, height MAE <= 0.08 m, planar-speed RMS <= 0.15 m/s |
+| Stand | `(0, 0, 0, default_height)` | survival >= 0.95, height MAE <= 0.08 m, tilt RMS <= 0.20 rad |
+| Forward | `(0.5, 0, 0, default_height)` | survival >= 0.90, vx MAE <= 0.20 m/s, height MAE <= 0.10 m |
+| Turn | `(0, 0, 0.5, default_height)` | survival >= 0.90, yaw-rate MAE <= 0.25 rad/s, height MAE <= 0.10 m |
+| Crouch | `(0, 0, 0, 0.80)` | survival >= 0.90, height MAE <= 0.08 m, planar-speed RMS <= 0.15 m/s |
 
-Every seed must remain finite and meet the survival threshold. Other limits
-are aggregate across the three fixed seeds. Per-seed and aggregate metrics,
-trajectory hashes, checkpoint hash, and optional video hashes are recorded.
+Every seed must remain finite and meet the survival threshold, where survival
+is `credited_env_steps / (16 * 1000)`. Each non-survival metric is first
+computed over that seed's credited environment steps, then aggregated as the
+equal-weight arithmetic mean of the three seed metrics. Height is not raw
+world root Z: the measured value is exactly the reward-authoritative
+torso-link-origin-to-sole quantity
+`max(root_z - left_foot_z, root_z - right_foot_z) + ankle_sole_distance`.
+Tilt RMS is `sqrt(mean(roll^2 + pitch^2))`; planar-speed RMS is
+`sqrt(mean(vx^2 + vy^2))`. Velocity and yaw errors are mean absolute errors in
+the root-link body frame.
+
+Every scenario result records the exact resolved command and mode, seed,
+`num_envs=16`, 1000 requested steps, source checkpoint path and SHA before and
+after, finite flag, credited environment steps, each environment's first
+non-timeout termination step and reason, timeout count, survival, scenario
+metrics, action SHA, and trajectory SHA. The aggregate report references the
+train and export evidence plus all twelve manifest/result hashes and records
+convergence, scenario, checkpoint, export, and immutable overall PASS/FAIL.
 
 ## 12. Failure behavior
 
@@ -339,7 +406,19 @@ isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/workflows/elf3_sim.py
 `isaaclab_ext/scripts/check_elf3_m5_headless.py` is a planner-owned acceptance
 harness committed with the tests and frozen before production implementation.
 
-Batch C changes no production files. Constants, assets, rewards, curriculum,
-M3a environment core, all eight generic HIM modules, and upstream paths remain
-frozen. Any proposed change to robot invariants, physics, reward semantics,
-M3a behavior, M4 HIM internals, or upstream files requires user approval.
+Batch C1 production may change only:
+
+```text
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/him_rl/runner.py
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/tasks/locomotion/elf3/elf3_homie_env.py
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/workflows/elf3_run.py
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/workflows/elf3_sim.py
+```
+
+The thin CLI script needs no change because it already delegates parsing and
+request execution. C1 must not modify reward functions, reward scales,
+termination rules, physics, robot constants or assets, curricula, training
+defaults, the other seven generic HIM modules, or upstream paths. C2 changes
+only planner-owned tests and
+`isaaclab_ext/scripts/check_elf3_m5_convergence.py`, introduced after C1
+independent acceptance. Any wider production change requires user approval.
