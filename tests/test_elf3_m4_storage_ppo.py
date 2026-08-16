@@ -44,6 +44,58 @@ def test_storage_preserves_stock_minibatch_prefix_and_appends_supervision():
     assert torch.equal(storage.estimator_masks[..., 0], torch.tensor([[True, False], [True, False]]))
 
 
+def test_storage_minibatch_keeps_exact_stock_field_order(monkeypatch):
+    obs = make_obs(2)
+    storage = HIMRolloutStorage(
+        "rl", 2, 2, obs, [C.NUM_POLICY_ACTIONS], [C.num_critic_obs()], "cpu"
+    )
+    transition = HIMRolloutStorage.Transition()
+    for marker in (1.0, 2.0):
+        fill_transition(transition, obs, marker)
+        storage.add_transitions(transition)
+        transition.clear()
+    for offset, tensor in enumerate(
+        (
+            storage.actions,
+            storage.values,
+            storage.advantages,
+            storage.returns,
+            storage.actions_log_prob,
+            storage.mu,
+            storage.sigma,
+            storage.next_critic_observations,
+        ),
+        start=1,
+    ):
+        tensor.copy_(torch.arange(tensor.numel()).reshape_as(tensor) + 1000 * offset)
+    for offset, tensor in enumerate(storage.observations.values(), start=20):
+        tensor.copy_(torch.arange(tensor.numel()).reshape_as(tensor) + 1000 * offset)
+    storage.estimator_masks.copy_(
+        torch.tensor([[[True], [False]], [[False], [True]]])
+    )
+    monkeypatch.setattr(torch, "randperm", lambda count, **_: torch.arange(count))
+
+    batch = next(storage.mini_batch_generator(1, 1))
+    expected = (
+        storage.observations.flatten(0, 1),
+        storage.actions.flatten(0, 1),
+        storage.values.flatten(0, 1),
+        storage.advantages.flatten(0, 1),
+        storage.returns.flatten(0, 1),
+        storage.actions_log_prob.flatten(0, 1),
+        storage.mu.flatten(0, 1),
+        storage.sigma.flatten(0, 1),
+    )
+    assert batch[0].keys() == expected[0].keys()
+    assert all(torch.equal(batch[0][key], expected[0][key]) for key in batch[0].keys())
+    assert all(torch.equal(actual, wanted) for actual, wanted in zip(batch[1:8], expected[1:]))
+    assert batch[8] == (None, None)
+    assert batch[9] is None
+    assert torch.equal(batch[10], storage.next_critic_observations.flatten(0, 1))
+    assert torch.equal(batch[11], storage.estimator_masks.flatten(0, 1))
+
+
+
 def test_single_branch_gae_exactly_matches_rsl_storage():
     torch.manual_seed(6)
     obs = make_obs(3)
@@ -101,6 +153,67 @@ def test_storage_rejects_bad_mask_overflow_incomplete_and_final_value_shape():
         storage.add_transitions(transition)
     with pytest.raises(ValueError, match="last values"):
         storage.compute_returns(torch.zeros(2, 2, 1), 0.99, 0.95)
+
+
+@pytest.mark.parametrize(
+    "mask",
+    [
+        torch.ones(2, dtype=torch.float32),
+        torch.ones(2, dtype=torch.int64),
+        torch.ones(1, 2, dtype=torch.bool),
+        torch.ones(2, 1, 1, dtype=torch.bool),
+    ],
+)
+def test_storage_rejects_nonboolean_or_noncanonical_mask_shapes(mask):
+    obs = make_obs(2)
+    storage = HIMRolloutStorage(
+        "rl", 2, 1, obs, [C.NUM_POLICY_ACTIONS], [C.num_critic_obs()], "cpu"
+    )
+    transition = HIMRolloutStorage.Transition()
+    fill_transition(transition, obs, 1.0, mask)
+    with pytest.raises(ValueError, match="mask"):
+        storage.add_transitions(transition)
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "observations",
+        "actions",
+        "rewards",
+        "dones",
+        "values",
+        "actions_log_prob",
+        "action_mean",
+        "action_sigma",
+        "next_critic_observations",
+        "estimator_masks",
+    ],
+)
+def test_storage_rejects_incomplete_transition_explicitly(missing):
+    obs = make_obs(2)
+    storage = HIMRolloutStorage(
+        "rl", 2, 1, obs, [C.NUM_POLICY_ACTIONS], [C.num_critic_obs()], "cpu"
+    )
+    transition = HIMRolloutStorage.Transition()
+    fill_transition(transition, obs, 1.0)
+    setattr(transition, missing, None)
+    with pytest.raises(ValueError, match="missing|incomplete"):
+        storage.add_transitions(transition)
+
+
+def test_storage_and_ppo_reject_recurrent_use_explicitly():
+    obs = make_obs(2)
+    storage = HIMRolloutStorage(
+        "rl", 2, 1, obs, [C.NUM_POLICY_ACTIONS], [C.num_critic_obs()], "cpu"
+    )
+    with pytest.raises(RuntimeError, match="recurrent"):
+        next(storage.recurrent_mini_batch_generator(1, 1))
+    policy = make_policy(2)
+    policy.is_recurrent = True
+    with pytest.raises(ValueError, match="recurrent"):
+        HIMPPO(policy, use_flip=False)
+
 
 
 def test_episode_safe_supervision_truth_table_and_invalid_terminal_contract():
