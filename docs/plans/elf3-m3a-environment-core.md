@@ -235,6 +235,16 @@ Run the integration harness only after Steps 1-5 are green:
   tests/isaac/check_elf3_m3a_env.py --headless --num-envs 8
 ```
 
+The harness creates a deterministic nominal acceptance profile without
+changing `Elf3HomieEnvCfg` defaults. Before `gym.make`, it keeps only the
+`massless_link_mass` startup event and sets the following test-cfg event terms
+to `None`: `physics_material`, `non_torso_link_mass`, `torso_payload`,
+`hand_payload`, `torso_com`, and `push_robot`. It also disables observation
+noise, action delay, control randomization, and initial-state randomization in
+that cfg instance. The approximately 43.22 kg assertion therefore validates
+the nominal URDF mass after the massless-link correction; it must not reject
+the intentional production mass/payload randomization.
+
 Expected lines before shutdown:
 
 ```text
@@ -258,7 +268,10 @@ Then run the production rollout:
   --headless --num-envs 32 --steps 1000 --seed 42 --device cuda:0
 ```
 
-Expected: 1000 steps, no non-finite values, PASS, internal exit code 0.
+Unlike the nominal integration harness, this command uses the unchanged
+production randomization defaults. Expected: 1000 steps, no non-finite values,
+PASS, internal exit code 0. Its total mass is allowed to differ from 43.22 kg
+within the configured domain-randomization ranges.
 
 Controlled timeout:
 

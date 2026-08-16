@@ -7,6 +7,7 @@ environment after the production environment and rollout entry point exist.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import sys
 import traceback
 from pathlib import Path
@@ -28,6 +29,7 @@ def _preflight() -> None:
 
 
 def main() -> int:
+    faulthandler.enable(all_threads=True)
     _preflight()
     sys.path.insert(0, str(EXTENSION_SOURCE))
 
@@ -57,7 +59,24 @@ def main() -> int:
 
         cfg = Elf3HomieEnvCfg()
         cfg.scene.num_envs = args.num_envs
+        assert cfg.events is not None
+        assert cfg.events.massless_link_mass is not None
+        for event_name in (
+            "physics_material",
+            "non_torso_link_mass",
+            "torso_payload",
+            "hand_payload",
+            "torso_com",
+            "push_robot",
+        ):
+            setattr(cfg.events, event_name, None)
+        cfg.add_noise = False
+        cfg.enable_action_delay = False
+        cfg.randomize_control = False
+        cfg.randomize_initial_state = False
+        print("diagnostic boundary: entering gym.make", flush=True)
         env = gym.make(TASK_ID, cfg=cfg, render_mode=None)
+        print("diagnostic boundary: gym.make returned", flush=True)
         unwrapped = env.unwrapped
         robot = unwrapped.scene.articulations["robot"]
         obs, _ = env.reset(seed=42)
@@ -137,12 +156,14 @@ def main() -> int:
         env.close()
         print("M3a Isaac integration: PASS")
         exit_code = 0
-    except Exception:
+    except BaseException:
         traceback.print_exc()
-        print("M3a Isaac integration: FAIL")
+        print("M3a Isaac integration: FAIL", flush=True)
         exit_code = 1
     finally:
-        print(f"check_elf3_m3a_env exit code: {exit_code}")
+        print(f"check_elf3_m3a_env exit code: {exit_code}", flush=True)
+        sys.stdout.flush()
+        sys.stderr.flush()
         simulation_app.close()
     return exit_code
 
