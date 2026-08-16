@@ -71,7 +71,7 @@ def convergence():
     return {
         "mean_episode_length": [40.0] * 100 + [301.0] * 100,
         "timeouts": [0.0] * 195 + [1.0] * 5,
-        "scalars": {k: [1.0] for k in scalar_names},
+        "scalars": {k: [1.0] * 200 for k in scalar_names},
         "actual_transitions": 4096 * 2000 * 50,
         "expected_transitions": 4096 * 2000 * 50,
     }
@@ -175,6 +175,25 @@ def test_atomic_json_fsyncs_and_replaces_in_destination_directory(
     assert replace_calls and replace_calls[-1][1] == target
 
 
+def test_atomic_json_never_deletes_a_concurrent_writers_target(
+    tmp_path, monkeypatch
+):
+    module = api()
+    target = tmp_path / "manifest.json"
+    real_open = module.os.open
+
+    def lose_reservation(path, flags, mode=0o777):
+        if module.Path(path) == target:
+            target.write_bytes(b"concurrent-owner")
+            raise FileExistsError("lost O_EXCL race")
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(module.os, "open", lose_reservation)
+    with pytest.raises(FileExistsError):
+        module.write_json_once(target, {"schema_version": 1})
+    assert target.read_bytes() == b"concurrent-owner"
+
+
 def test_classify_absent_incomplete_pass_and_fail(tmp_path):
     m = api()
     assert m.classify_run(tmp_path / "none") == "ABSENT"
@@ -259,9 +278,56 @@ def test_manifest_requires_identity_and_rejects_nonfinite_or_machine_paths():
         m.validate_manifest(p)
 
 
+def test_manifest_modes_and_path_ownership():
+    m = api()
+    m.validate_manifest(manifest())
+    for command in ("play", "export"):
+        p = manifest()
+        p["command"] = command
+        p["iterations"] = None
+        m.validate_manifest(p)
+
+    p = manifest()
+    p["iterations"] = None
+    with pytest.raises((TypeError, ValueError)):
+        m.validate_manifest(p)
+    for command in ("play", "export"):
+        p = manifest()
+        p["command"] = command
+        with pytest.raises((TypeError, ValueError)):
+            m.validate_manifest(p)
+
+    p = manifest()
+    p["runtime"]["isaaclab_path"] = (
+        "/home/user/wang-sm/IsaacLab-v2.3.2/source/isaaclab"
+    )
+    m.validate_manifest(p)
+
+    p = manifest()
+    p["git"]["dirty_paths"] = ["/home/user/wang-sm/OpenHomie/x.py"]
+    with pytest.raises((TypeError, ValueError)):
+        m.validate_manifest(p)
+    p = manifest()
+    p["m4_sources"]["files"] = {
+        "/home/user/wang-sm/OpenHomie/him_rl/runner.py": "a" * 64
+    }
+    with pytest.raises((TypeError, ValueError)):
+        m.validate_manifest(p)
+
+
 @pytest.mark.parametrize(
     "change",
-    ("mean", "ratio", "timeouts", "nan", "inf", "missing", "short", "budget"),
+    (
+        "mean",
+        "ratio",
+        "timeouts",
+        "nan",
+        "inf",
+        "missing",
+        "short",
+        "short_scalar",
+        "budget",
+    ),
 )
 def test_convergence_rejects_each_contract_failure(change):
     m = api()
@@ -280,6 +346,8 @@ def test_convergence_rejects_each_contract_failure(change):
         p["scalars"].pop("entropy")
     elif change == "short":
         p["mean_episode_length"] = [301.0] * 199
+    elif change == "short_scalar":
+        p["scalars"]["reward"] = [1.0]
     else:
         p["actual_transitions"] -= 1
     result = m.evaluate_convergence(p)
