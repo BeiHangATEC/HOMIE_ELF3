@@ -142,3 +142,34 @@ def test_actor_critic_rejects_missing_groups_and_nonpositive_noise():
             C.NUM_POLICY_ACTIONS,
             **policy_kwargs(init_noise_std=0.0),
         )
+
+
+@pytest.mark.parametrize(
+    "invalid_std",
+    [0.0, -1.0, float("nan"), float("inf"), float("-inf")],
+)
+def test_distribution_rejects_runtime_nonpositive_or_nonfinite_std(invalid_std):
+    policy = make_policy(2)
+    with torch.no_grad():
+        policy.std.fill_(invalid_std)
+    with pytest.raises(ValueError, match="finite and positive"):
+        policy.act(make_obs(2))
+
+
+def test_constructor_accepts_disabled_state_dependent_std_and_rejects_enabled():
+    policy = make_policy(2, state_dependent_std=False)
+    assert policy.act(make_obs(2)).shape == (2, C.NUM_POLICY_ACTIONS)
+    with pytest.raises(ValueError, match="state-dependent"):
+        make_policy(2, state_dependent_std=True)
+
+
+def test_prefixed_estimator_config_is_mapped_to_estimator_parameters():
+    policy = make_policy(
+        2,
+        estimator_temperature=2.5,
+        estimator_sinkhorn_epsilon=0.07,
+        estimator_sinkhorn_iterations=5,
+    )
+    assert policy.estimator.temperature == 2.5
+    assert policy.estimator.sinkhorn_epsilon == 0.07
+    assert policy.estimator.sinkhorn_iterations == 5
