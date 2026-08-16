@@ -20,6 +20,9 @@ CHECKPOINT_SCHEMA_VERSION = 1
 CANONICAL_NUM_ENVS = 4096
 CANONICAL_ITERATIONS = 2000
 CANONICAL_STEPS_PER_ENV = 50
+ORDINARY_PLAY_STEPS = 100
+EVALUATION_STEPS = 1000
+EVALUATION_NUM_ENVS = 16
 _DEVICE = re.compile(r"(?:cpu|cuda:[0-9]+)\Z")
 _SCALARS = frozenset(
     {"reward", "policy_loss", "value_loss", "estimator_loss",
@@ -34,6 +37,20 @@ _LIMITS = {
 
 
 @dataclass(frozen=True)
+class EvaluationScenario:
+    command: tuple[float, float, float, float | None]
+    mode: int
+
+
+EVALUATION_SCENARIOS = {
+    "stand": EvaluationScenario((0.0, 0.0, 0.0, None), 1),
+    "forward": EvaluationScenario((0.5, 0.0, 0.0, None), 0),
+    "turn": EvaluationScenario((0.0, 0.0, 0.5, None), 0),
+    "crouch": EvaluationScenario((0.0, 0.0, 0.0, 0.80), 2),
+}
+
+
+@dataclass(frozen=True)
 class RunRequest:
     command: str
     run_dir: Path
@@ -44,6 +61,8 @@ class RunRequest:
     checkpoint: Path | None = None
     resume: bool = False
     headless: bool = False
+    scenario: str | None = None
+    steps: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe(asdict(self))
@@ -85,10 +104,14 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--iterations", required=True, type=_positive)
     train.add_argument("--resume", action="store_true")
     train.add_argument("--checkpoint")
-    for name in ("play", "export"):
-        command = commands.add_parser(name)
-        _common(command)
-        command.add_argument("--checkpoint", required=True)
+    play = commands.add_parser("play")
+    _common(play)
+    play.add_argument("--checkpoint", required=True)
+    play.add_argument("--scenario", choices=tuple(EVALUATION_SCENARIOS))
+    play.add_argument("--steps", type=_positive)
+    export = commands.add_parser("export")
+    _common(export)
+    export.add_argument("--checkpoint", required=True)
     return parser
 
 
@@ -132,10 +155,34 @@ def parse_request(argv: Sequence[str] | None = None) -> RunRequest:
             raise ValueError("resume requires --checkpoint")
         if not resume and raw_checkpoint is not None:
             raise ValueError("fresh training rejects --checkpoint")
+    scenario = getattr(args, "scenario", None)
+    requested_steps = getattr(args, "steps", None)
+    if args.command == "play":
+        if (scenario is None) != (requested_steps is None):
+            raise ValueError("--scenario and --steps must be provided together")
+        if scenario is None:
+            steps = ORDINARY_PLAY_STEPS
+        else:
+            if requested_steps != EVALUATION_STEPS:
+                raise ValueError("scenario play requires exactly 1000 steps")
+            if args.num_envs != EVALUATION_NUM_ENVS:
+                raise ValueError("scenario play requires exactly 16 environments")
+            steps = EVALUATION_STEPS
+    else:
+        steps = None
     checkpoint = resolve_checkpoint(raw_checkpoint) if raw_checkpoint else None
     return RunRequest(
-        args.command, run_dir, args.device, args.seed, args.num_envs,
-        getattr(args, "iterations", None), checkpoint, resume, args.headless
+        command=args.command,
+        run_dir=run_dir,
+        device=args.device,
+        seed=args.seed,
+        num_envs=args.num_envs,
+        iterations=getattr(args, "iterations", None),
+        checkpoint=checkpoint,
+        resume=resume,
+        headless=args.headless,
+        scenario=scenario,
+        steps=steps,
     )
 
 

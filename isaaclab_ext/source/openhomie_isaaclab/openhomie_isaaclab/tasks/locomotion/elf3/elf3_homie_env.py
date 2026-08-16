@@ -167,6 +167,8 @@ class Elf3HomieEnv(DirectRLEnv):
 
         self._commands = torch.zeros(n, 5, device=self.device)
         self._modes = torch.zeros(n, dtype=torch.long, device=self.device)
+        self._evaluation_command: torch.Tensor | None = None
+        self._evaluation_mode: int | None = None
         self._stage = elf3_stages.get_stage(self.cfg.command_stage)
         self._command_steps = max(1, round(self.cfg.command_resampling_time_s / self.step_dt))
         self._upper_steps = max(1, round(self.cfg.upper_body_resampling_time_s / self.step_dt))
@@ -323,8 +325,74 @@ class Elf3HomieEnv(DirectRLEnv):
             self._last_history_step = self.common_step_counter
         return self._snapshot()
 
+    def set_evaluation_command(
+        self, command: Sequence[float | None], mode: int
+    ) -> None:
+        if isinstance(command, (str, bytes)) or len(command) != 4:
+            raise ValueError("evaluation command must contain vx, vy, yaw rate, and height")
+        if isinstance(mode, bool) or not isinstance(mode, int):
+            raise TypeError("evaluation mode must be an integer")
+        if mode not in (curriculum.WALK, curriculum.HIGH_STAND, curriculum.CROUCH_LOW):
+            raise ValueError("evaluation mode is unsupported")
+        values = tuple(command)
+        height = self._stage.walk_height if values[3] is None else values[3]
+        resolved = torch.as_tensor(
+            (values[0], values[1], values[2], height),
+            dtype=self._commands.dtype,
+            device=self.device,
+        )
+        if resolved.shape != (4,) or not torch.isfinite(resolved).all():
+            raise ValueError("evaluation command must be a finite four-vector")
+        fixed = torch.zeros(5, dtype=self._commands.dtype, device=self.device)
+        fixed[:3] = resolved[:3]
+        fixed[4] = resolved[3]
+        self._evaluation_command = fixed
+        self._evaluation_mode = mode
+        self._commands[:, :3] = resolved[:3]
+        self._commands[:, 3] = 0.0
+        self._commands[:, 4] = resolved[3]
+        self._modes.fill_(mode)
+
+    def get_evaluation_observables(self) -> dict[str, torch.Tensor]:
+        root_lin_vel_b = self._robot.data.root_link_lin_vel_b
+        root_ang_vel_b = self._robot.data.root_link_ang_vel_b
+        roll, pitch, _ = math_utils.euler_xyz_from_quat(
+            self._robot.data.root_link_quat_w
+        )
+        roll_pitch = torch.stack((roll, pitch), dim=-1)
+        root_height = self._robot.data.root_link_pos_w[:, 2]
+        feet_height = self._robot.data.body_pos_w[:, self._feet_ids, 2]
+        tracking_height = torch.maximum(
+            root_height - feet_height[:, 0], root_height - feet_height[:, 1]
+        ) + self.cfg.ankle_sole_distance
+        observables = {
+            "command": torch.cat(
+                (self._commands[:, :3], self._commands[:, 4:5]), dim=-1
+            ),
+            "root_lin_vel_b": root_lin_vel_b,
+            "root_ang_vel_b": root_ang_vel_b,
+            "roll_pitch": roll_pitch,
+            "tracking_height": tracking_height,
+        }
+        expected_shapes = {
+            "command": (self.num_envs, 4),
+            "root_lin_vel_b": (self.num_envs, 3),
+            "root_ang_vel_b": (self.num_envs, 3),
+            "roll_pitch": (self.num_envs, 2),
+            "tracking_height": (self.num_envs,),
+        }
+        for name, value in observables.items():
+            if tuple(value.shape) != expected_shapes[name]:
+                raise RuntimeError(f"ELF3 evaluation {name} shape mismatch")
+            self._assert_finite(value, f"evaluation observable {name}")
+        return {name: value.detach().clone() for name, value in observables.items()}
+
     def _resample_commands(self, env_ids: torch.Tensor):
         if env_ids.numel() == 0:
+            return
+        if self._evaluation_command is not None:
+            self._commands[env_ids] = self._evaluation_command
+            self._modes[env_ids] = self._evaluation_mode
             return
         count = env_ids.numel()
         if self.cfg.use_random_commands:
@@ -343,6 +411,8 @@ class Elf3HomieEnv(DirectRLEnv):
         self._commands[env_ids] = commands
 
     def _maybe_resample_commands(self):
+        if self._evaluation_command is not None:
+            return
         due = (self.episode_length_buf > 0) & (self.episode_length_buf % self._command_steps == 0)
         self._resample_commands(due.nonzero().flatten())
 

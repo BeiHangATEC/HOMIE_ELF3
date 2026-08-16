@@ -39,6 +39,9 @@ from openhomie_isaaclab.him_rl.exporter import (
 from openhomie_isaaclab.him_rl.runner import HIMOnPolicyRunner
 from openhomie_isaaclab.tasks.locomotion import elf3 as elf3_task
 from openhomie_isaaclab.workflows.elf3_run import (
+    EVALUATION_NUM_ENVS,
+    EVALUATION_SCENARIOS,
+    EVALUATION_STEPS,
     MANIFEST_SCHEMA_VERSION,
     create_run_directory,
     final_iteration,
@@ -442,6 +445,9 @@ def _adapt_bool_dones(env: RslRlVecEnvWrapper) -> RslRlVecEnvWrapper:
 def _create_runner(request, env_cfg, agent_cfg):
     raw_env = gym.make(TASK_ID, cfg=env_cfg, render_mode=None)
     try:
+        if request.scenario is not None:
+            scenario = EVALUATION_SCENARIOS[request.scenario]
+            raw_env.unwrapped.set_evaluation_command(scenario.command, scenario.mode)
         env = RslRlVecEnvWrapper(raw_env, clip_actions=agent_cfg.clip_actions)
     except Exception:
         raw_env.close()
@@ -517,6 +523,170 @@ def _training_result(request, runner: HIMOnPolicyRunner, start_iteration: int) -
     }
 
 
+def _update_tensor_hash(
+    digest: Any, name: str, tensor: torch.Tensor
+) -> None:
+    value = tensor.detach().cpu().contiguous()
+    digest.update(name.encode("utf-8"))
+    digest.update(str(tuple(value.shape)).encode("ascii"))
+    digest.update(str(value.dtype).encode("ascii"))
+    digest.update(value.numpy().tobytes())
+
+
+def _scenario_play_result(
+    request,
+    env: RslRlVecEnvWrapper,
+    policy,
+    observations: TensorDict,
+    checkpoint_sha256: str,
+) -> dict[str, Any]:
+    if (
+        request.scenario not in EVALUATION_SCENARIOS
+        or request.steps != EVALUATION_STEPS
+        or request.num_envs != EVALUATION_NUM_ENVS
+    ):
+        raise ValueError("scenario play requires one catalog scenario and 1000 steps")
+    scenario = EVALUATION_SCENARIOS[request.scenario]
+    raw_env = env.unwrapped
+    initial = raw_env.get_evaluation_observables()
+    resolved_command = initial["command"][0].detach().clone()
+    if tuple(resolved_command.shape) != (4,):
+        raise RuntimeError("resolved evaluation command shape is invalid")
+    _require_finite("resolved evaluation command", resolved_command)
+
+    active = torch.ones(request.num_envs, dtype=torch.bool, device=env.device)
+    termination_steps: list[int | None] = [None] * request.num_envs
+    termination_reasons: list[str | None] = [None] * request.num_envs
+    credited_env_steps = 0
+    timeout_count = 0
+    metric_sums = {
+        "height_abs": torch.zeros((), dtype=torch.float64, device=env.device),
+        "tilt_sq": torch.zeros((), dtype=torch.float64, device=env.device),
+        "velocity_abs": torch.zeros((), dtype=torch.float64, device=env.device),
+        "yaw_rate_abs": torch.zeros((), dtype=torch.float64, device=env.device),
+        "planar_speed_sq": torch.zeros((), dtype=torch.float64, device=env.device),
+    }
+    action_hash = hashlib.sha256()
+    trajectory_hash = hashlib.sha256()
+
+    with torch.inference_mode():
+        for step_index in range(request.steps):
+            _require_finite("scenario observations", observations)
+            snapshot = raw_env.get_evaluation_observables()
+            expected_commands = resolved_command.unsqueeze(0).expand(request.num_envs, -1)
+            if not torch.equal(snapshot["command"], expected_commands):
+                raise RuntimeError("fixed evaluation command changed during scenario play")
+            for name in (
+                "command",
+                "root_lin_vel_b",
+                "root_ang_vel_b",
+                "roll_pitch",
+                "tracking_height",
+            ):
+                _update_tensor_hash(trajectory_hash, name, snapshot[name])
+
+            active_before = active.clone()
+            credited_env_steps += int(torch.count_nonzero(active_before).item())
+            height_error = torch.abs(
+                snapshot["tracking_height"] - resolved_command[3]
+            )
+            velocity_error = torch.abs(
+                snapshot["root_lin_vel_b"][:, 0] - resolved_command[0]
+            )
+            yaw_rate_error = torch.abs(
+                snapshot["root_ang_vel_b"][:, 2] - resolved_command[2]
+            )
+            tilt_sq = torch.sum(torch.square(snapshot["roll_pitch"]), dim=-1)
+            planar_speed_sq = torch.sum(
+                torch.square(snapshot["root_lin_vel_b"][:, :2]), dim=-1
+            )
+            for name, values in (
+                ("height_abs", height_error),
+                ("tilt_sq", tilt_sq),
+                ("velocity_abs", velocity_error),
+                ("yaw_rate_abs", yaw_rate_error),
+                ("planar_speed_sq", planar_speed_sq),
+            ):
+                metric_sums[name].add_(values[active_before].sum(dtype=torch.float64))
+
+            actions = policy(observations)
+            expected_shape = (request.num_envs, C.NUM_POLICY_ACTIONS)
+            if tuple(actions.shape) != expected_shape:
+                raise RuntimeError("scenario action shape is invalid")
+            _require_finite("scenario actions", actions)
+            _update_tensor_hash(action_hash, "action", actions)
+            observations, rewards, dones, extras = env.step(actions.to(env.device))
+            observations = observations.to(request.device)
+            _require_finite("scenario rewards", rewards)
+            if dones.dtype != torch.bool or tuple(dones.shape) != (request.num_envs,):
+                raise RuntimeError("scenario dones must be a boolean environment vector")
+            time_outs = extras.get("time_outs")
+            if (
+                not isinstance(time_outs, torch.Tensor)
+                or time_outs.dtype != torch.bool
+                or tuple(time_outs.shape) != (request.num_envs,)
+            ):
+                raise RuntimeError("scenario time_outs must be a boolean environment vector")
+            _update_tensor_hash(trajectory_hash, "reward", rewards)
+            _update_tensor_hash(trajectory_hash, "done", dones)
+            _update_tensor_hash(trajectory_hash, "time_out", time_outs)
+
+            timeout_count += int(
+                torch.count_nonzero(time_outs & active_before).item()
+            )
+            non_timeout = dones & ~time_outs & active_before
+            if torch.any(non_timeout):
+                for env_id in non_timeout.nonzero(as_tuple=False).flatten().tolist():
+                    termination_steps[env_id] = step_index + 1
+                    termination_reasons[env_id] = "terminated"
+                active &= ~non_timeout
+
+    if credited_env_steps <= 0:
+        raise RuntimeError("scenario play produced no credited environment steps")
+    denominator = float(credited_env_steps)
+    all_metrics = {
+        "height_mae": float(metric_sums["height_abs"].item() / denominator),
+        "tilt_rms": math.sqrt(float(metric_sums["tilt_sq"].item() / denominator)),
+        "velocity_mae": float(metric_sums["velocity_abs"].item() / denominator),
+        "yaw_rate_mae": float(metric_sums["yaw_rate_abs"].item() / denominator),
+        "planar_speed_rms": math.sqrt(
+            float(metric_sums["planar_speed_sq"].item() / denominator)
+        ),
+    }
+    metric_names = {
+        "stand": ("height_mae", "tilt_rms"),
+        "forward": ("velocity_mae", "height_mae"),
+        "turn": ("yaw_rate_mae", "height_mae"),
+        "crouch": ("height_mae", "planar_speed_rms"),
+    }[request.scenario]
+    metrics = {name: all_metrics[name] for name in metric_names}
+    survival = credited_env_steps / (request.num_envs * request.steps)
+    _require_finite("scenario metrics", metrics)
+    _require_finite("scenario survival", survival)
+    return {
+        "status": "PASS",
+        "play": {
+            "scenario": request.scenario,
+            "command": [float(value) for value in resolved_command.cpu().tolist()],
+            "mode": scenario.mode,
+            "seed": request.seed,
+            "steps": request.steps,
+            "num_envs": request.num_envs,
+            "checkpoint_path": str(request.checkpoint),
+            "finite": True,
+            "credited_env_steps": credited_env_steps,
+            "non_timeout_termination_steps": termination_steps,
+            "non_timeout_termination_reasons": termination_reasons,
+            "timeout_count": timeout_count,
+            "survival": survival,
+            "metrics": metrics,
+            "action_sha256": action_hash.hexdigest(),
+            "trajectory_sha256": trajectory_hash.hexdigest(),
+            "sha256_before": checkpoint_sha256,
+        },
+    }
+
+
 def _play_result(
     request,
     env: RslRlVecEnvWrapper,
@@ -533,11 +703,21 @@ def _play_result(
     runner.eval_mode()
     policy = runner.get_inference_policy(device=request.device)
     observations = env.get_observations().to(request.device)
+    if request.scenario is not None:
+        return _scenario_play_result(
+            request,
+            env,
+            policy,
+            observations,
+            checkpoint_sha256,
+        )
+    if request.steps != PLAY_STEPS:
+        raise ValueError("ordinary play requires exactly 100 steps")
     action_hash = hashlib.sha256()
     max_abs_diff = 0.0
     action_shape: list[int] | None = None
     with torch.inference_mode():
-        for _ in range(PLAY_STEPS):
+        for _ in range(request.steps):
             _require_finite("play observations", observations)
             first = policy(observations)
             second = policy(observations)
@@ -560,7 +740,7 @@ def _play_result(
     return {
         "status": "PASS",
         "play": {
-            "steps": PLAY_STEPS,
+            "steps": request.steps,
             "action_shape": action_shape,
             "finite": True,
             "deterministic": True,

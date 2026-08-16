@@ -21,6 +21,32 @@ from .actor_critic import HIMActorCritic
 from .ppo import HIMPPO
 
 
+TIMEOUT_SCALAR_TAG = "Episode_Termination/time_out"
+TIMEOUT_SCALAR_UNIT = "rollout_transition_fraction"
+
+
+def _rollout_timeout_fraction(
+    timeout_count: int, *, num_envs: int, num_steps_per_env: int
+) -> float:
+    """Return the fraction of rollout transitions that ended by timeout."""
+    for value, name in (
+        (timeout_count, "timeout_count"),
+        (num_envs, "num_envs"),
+        (num_steps_per_env, "num_steps_per_env"),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+            raise TypeError(f"{name} must be an integer")
+    if num_envs <= 0 or num_steps_per_env <= 0:
+        raise ValueError("rollout dimensions must be positive")
+    transition_count = int(num_envs) * int(num_steps_per_env)
+    if timeout_count < 0 or timeout_count > transition_count:
+        raise ValueError("timeout_count must lie within the rollout")
+    fraction = float(timeout_count) / transition_count
+    if not math.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
+        raise RuntimeError("timeout fraction is invalid")
+    return fraction
+
+
 class HIMOnPolicyRunner(OnPolicyRunner):
     """Minimal rsl-rl runner specialized to the approved HIM classes."""
 
@@ -101,6 +127,7 @@ class HIMOnPolicyRunner(OnPolicyRunner):
         tot_iter = start_iter + num_learning_iterations
         last_saved_iteration: int | None = None
         for _ in range(num_learning_iterations):
+            timeout_count = torch.zeros((), dtype=torch.long, device=self.env.device)
             collection_start = time.time()
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
@@ -113,6 +140,14 @@ class HIMOnPolicyRunner(OnPolicyRunner):
                     dones = dones.to(self.device)
                     self._require_finite("next observations", next_obs)
                     self._require_finite("rewards", rewards)
+                    time_outs = extras.get("time_outs")
+                    if not isinstance(time_outs, torch.Tensor):
+                        raise TypeError("time_outs must be a tensor")
+                    if time_outs.dtype != torch.bool:
+                        raise TypeError("time_outs must be boolean")
+                    if tuple(time_outs.shape) != (self.env.num_envs,):
+                        raise ValueError("time_outs shape does not match the environment batch")
+                    timeout_count.add_(torch.count_nonzero(time_outs))
                     self.alg.process_env_step(next_obs, rewards, dones, extras)
                     obs = next_obs
                     if self.log_dir is not None:
@@ -139,6 +174,11 @@ class HIMOnPolicyRunner(OnPolicyRunner):
             self.current_learning_iteration += 1
             completed_iteration = self.current_learning_iteration
             it = completed_iteration
+            timeout_fraction = _rollout_timeout_fraction(
+                int(timeout_count.item()),
+                num_envs=self.env.num_envs,
+                num_steps_per_env=self.num_steps_per_env,
+            )
             if self.log_dir is not None:
                 self.log(locals())
                 if completed_iteration % self.save_interval == 0:
@@ -156,6 +196,10 @@ class HIMOnPolicyRunner(OnPolicyRunner):
                     self.log_dir, f"model_{self.current_learning_iteration}.pt"
                 )
             )
+
+    def log(self, locs: dict, *args, **kwargs) -> None:
+        super().log(locs, *args, **kwargs)
+        self.writer.add_scalar(TIMEOUT_SCALAR_TAG, locs["timeout_fraction"], locs["it"])
 
     def get_training_metrics(self) -> dict[str, float]:
         return dict(self._training_metrics)
