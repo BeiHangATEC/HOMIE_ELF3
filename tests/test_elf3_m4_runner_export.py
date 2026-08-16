@@ -504,3 +504,34 @@ def test_export_functions_preserve_live_policy_mode_device_dtype_and_state(tmp_p
     assert all(
         torch.equal(before[key], value) for key, value in policy.state_dict().items()
     )
+
+
+def test_runner_retains_logging_and_checkpoint_hooks_when_log_dir_is_set(
+    tmp_path, monkeypatch
+):
+    config = runner_cfg(use_flip=False)
+    config["num_steps_per_env"] = 1
+    config["save_interval"] = 1
+    runner = HIMOnPolicyRunner(FakeVecEnv(), config, str(tmp_path), "cpu")
+    prepared = []
+    logged_iterations = []
+    saved_paths = []
+    monkeypatch.setattr(
+        runner, "_prepare_logging_writer", lambda: prepared.append(True)
+    )
+    monkeypatch.setattr(
+        runner,
+        "log",
+        lambda locs: logged_iterations.append(locs["completed_iteration"]),
+    )
+    monkeypatch.setattr(
+        runner,
+        "save",
+        lambda path, infos=None: saved_paths.append(Path(path)),
+    )
+    runner.learn(1)
+    assert prepared == [True]
+    assert logged_iterations == [1]
+    assert saved_paths
+    assert all(path.parent == tmp_path for path in saved_paths)
+    assert any(path.name == "model_1.pt" for path in saved_paths)
