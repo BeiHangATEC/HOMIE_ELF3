@@ -13,6 +13,9 @@ if TASK_ID not in gym.registry:
             "env_cfg_entry_point": (
                 "openhomie_isaaclab.tasks.locomotion.elf3."
                 "elf3_homie_env_cfg:Elf3HomieEnvCfg"
-            )
+            ),
+            "rsl_rl_cfg_entry_point": (
+                "openhomie_isaaclab.tasks.locomotion.elf3.agents.him_ppo_cfg:Elf3HIMRunnerCfg"
+            ),
         },
     )
