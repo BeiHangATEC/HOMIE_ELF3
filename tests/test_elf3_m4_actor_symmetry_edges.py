@@ -173,3 +173,30 @@ def test_prefixed_estimator_config_is_mapped_to_estimator_parameters():
     assert policy.estimator.temperature == 2.5
     assert policy.estimator.sinkhorn_epsilon == 0.07
     assert policy.estimator.sinkhorn_iterations == 5
+
+
+def test_actor_critic_requires_three_value_velocity_tail():
+    obs = make_obs()
+    wider_critic = torch.zeros(4, C.num_critic_obs() + 1)
+    bad_obs = obs.clone()
+    bad_obs["critic"] = wider_critic
+    with pytest.raises(ValueError, match="three-value velocity tail"):
+        HIMActorCritic(
+            bad_obs,
+            copy.deepcopy(OBS_GROUPS),
+            C.NUM_POLICY_ACTIONS,
+            **policy_kwargs(num_one_step_critic_obs=C.num_one_step_critic_obs() + 1),
+        )
+
+
+def test_actor_critic_rejects_multi_frame_critic_history():
+    obs = make_obs()
+    bad_obs = obs.clone()
+    bad_obs["critic"] = torch.zeros(4, C.num_one_step_critic_obs() * 2)
+    with pytest.raises(ValueError, match="critic history.*one"):
+        HIMActorCritic(
+            bad_obs,
+            copy.deepcopy(OBS_GROUPS),
+            C.NUM_POLICY_ACTIONS,
+            **policy_kwargs(critic_history_length=2),
+        )
