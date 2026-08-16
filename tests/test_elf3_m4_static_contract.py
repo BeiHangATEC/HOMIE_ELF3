@@ -102,6 +102,11 @@ def test_agent_cfg_derives_canonical_dimensions_and_public_class_names():
 
     cfg = Elf3HIMRunnerCfg()
     assert cfg.class_name == "HIMOnPolicyRunner"
+    assert cfg.seed == 42
+    assert cfg.device == "cuda:0"
+    assert cfg.max_iterations == 50_000
+    assert cfg.clip_actions == 100.0
+    assert cfg.experiment_name == "elf3_homie_him_isaaclab"
     assert cfg.algorithm.class_name == "HIMPPO"
     assert cfg.policy.class_name == "HIMActorCritic"
     assert cfg.obs_groups == {"policy": ["policy"], "critic": ["critic"]}
@@ -117,6 +122,8 @@ def test_agent_cfg_derives_canonical_dimensions_and_public_class_names():
     assert cfg.algorithm.estimator_learning_rate == 1.0e-3
     assert cfg.algorithm.schedule == "adaptive"
     assert cfg.algorithm.entropy_coef == 0.01
+    assert cfg.algorithm.rnd_cfg is None
+    assert cfg.algorithm.symmetry_cfg is None
     assert cfg.algorithm.mirror == {
         "dof_mirror_indices": list(C.DOF_MIRROR_INDICES),
         "dof_mirror_signs": list(C.DOF_MIRROR_SIGNS),
