@@ -541,7 +541,7 @@ def test_real_tensorboard_logging_repeated_learn_and_checkpoint_numbering(tmp_pa
     env = FakeVecEnv()
     config = runner_cfg(use_flip=False)
     config["num_steps_per_env"] = 1
-    config["save_interval"] = 1
+    config["save_interval"] = 200
     config["logger"] = "tensorboard"
     runner = HIMOnPolicyRunner(env, config, str(tmp_path), "cpu")
     runner.learn(1)
