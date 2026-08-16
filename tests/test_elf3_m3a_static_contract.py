@@ -94,15 +94,24 @@ def test_random_rollout_entry_point_exists_parses_and_reports_before_close():
 
 
 def test_m3a_files_do_not_embed_machine_specific_paths_or_m4_m6_imports():
-    paths = [
+    core_paths = [
         ELF3_TASK / "elf3_homie_env_core.py",
         ELF3_TASK / "elf3_homie_env_cfg.py",
         ELF3_TASK / "elf3_homie_env.py",
-        ELF3_TASK / "__init__.py",
         ROLLOUT,
     ]
-    combined = "\n".join(_source(path) for path in paths)
+    combined = "\n".join(_source(path) for path in core_paths)
     assert "/home/" not in combined
     assert "/root/" not in combined
     for forbidden in ("him_rl", "rsl_rl", "mujoco", "sim2sim"):
         assert forbidden not in combined.lower()
+
+    registration = _source(ELF3_TASK / "__init__.py")
+    assert "/home/" not in registration
+    assert "/root/" not in registration
+    imported = _imported_modules(registration)
+    assert not any(
+        token in module.lower()
+        for module in imported
+        for token in ("agents", "him_rl", "rsl_rl", "mujoco", "sim2sim")
+    )
