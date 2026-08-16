@@ -535,3 +535,25 @@ def test_runner_retains_logging_and_checkpoint_hooks_when_log_dir_is_set(
     assert saved_paths
     assert all(path.parent == tmp_path for path in saved_paths)
     assert any(path.name == "model_1.pt" for path in saved_paths)
+
+
+def test_real_tensorboard_logging_repeated_learn_and_checkpoint_numbering(tmp_path):
+    env = FakeVecEnv()
+    config = runner_cfg(use_flip=False)
+    config["num_steps_per_env"] = 1
+    config["save_interval"] = 1
+    config["logger"] = "tensorboard"
+    runner = HIMOnPolicyRunner(env, config, str(tmp_path), "cpu")
+    runner.learn(1)
+    assert runner.current_learning_iteration == 1
+    assert env.step_count == 1
+    assert runner.tot_timesteps == env.num_envs
+    assert (tmp_path / "model_1.pt").is_file()
+    runner.learn(1)
+    assert runner.current_learning_iteration == 2
+    assert env.step_count == 2
+    assert runner.tot_timesteps == 2 * env.num_envs
+    assert (tmp_path / "model_2.pt").is_file()
+    assert runner.writer is not None
+    runner.writer.flush()
+    assert list(tmp_path.glob("events.out.tfevents.*"))
