@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openhomie-isaaclab"
+version = "0.1.0"
+description = "OpenHomie Isaac Lab tasks for ELF3 locomotion."
+requires-python = ">=3.10"
+
+# Pinned deliberately. The previous attempt declared no dependencies at all,
+# which is why nothing in it could be imported: it was written against
+# rsl-rl 3.x while upstream OpenHomie vendors an incompatible 1.0.2 fork.
+dependencies = [
+    "rsl-rl-lib==3.1.2",
+]
+
+[project.optional-dependencies]
+# Isaac Lab and Isaac Sim are installed out-of-band (pip or source checkout),
+# so they are not hard requirements here; this extra documents the versions
+# this package is developed and tested against.
+isaaclab = ["isaaclab==2.3.2"]
+sim2sim = ["mujoco>=3.2"]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["source/openhomie_isaaclab"]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]

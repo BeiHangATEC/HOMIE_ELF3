@@ -74,3 +74,12 @@ build
 */build
 
 */__pycache__
+
+# Generated ELF3 USD: derived from elf3.urdf + meshes/ by
+# isaaclab_ext/scripts/convert_elf3_usd.py. The URDF is the source of record.
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/assets/elf3/elf3.usd
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/assets/elf3/elf3.usd.stamp.json
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/assets/elf3/configuration/
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/assets/elf3/config.yaml
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/assets/elf3/.asset_hash
+isaaclab_ext/source/openhomie_isaaclab/openhomie_isaaclab/assets/elf3/.usd_staging/
