@@ -227,7 +227,7 @@ def test_g1_single_stage_commands_use_the_full_velocity_and_height_ranges():
         lin_vel_x_range=(-0.8, 1.2),
         lin_vel_y_range=(-0.5, 0.5),
         ang_vel_yaw_range=(-0.8, 0.8),
-        height_range=(0.30, 1.01),
+        height_range=(0.40, 1.01),
         stand_height=1.01,
     )
     assert commands.shape == (3, 5)
@@ -244,10 +244,10 @@ def test_g1_single_stage_height_lower_bound_is_not_clamped():
         lin_vel_x_range=(-0.8, 1.2),
         lin_vel_y_range=(-0.5, 0.5),
         ang_vel_yaw_range=(-0.8, 0.8),
-        height_range=(0.30, 1.01),
+        height_range=(0.40, 1.01),
         stand_height=1.01,
     )
-    assert commands[0, 4].item() == pytest.approx(0.30)
+    assert commands[0, 4].item() == pytest.approx(0.40)
 
 
 # --------------------------------------------------------------------------

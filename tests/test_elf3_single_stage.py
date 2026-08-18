@@ -84,7 +84,7 @@ def test_live_log_payloads_show_the_request_and_effective_training_config(tmp_pa
     )
     env_cfg = SimpleNamespace(
         command_profile="g1_single_stage",
-        single_stage_height_range=(0.30, 1.01),
+        single_stage_height_range=(0.40, 1.01),
         single_stage_stand_height=1.01,
         lin_vel_x_range=(-0.8, 1.2),
         lin_vel_y_range=(-0.5, 0.5),
@@ -92,12 +92,21 @@ def test_live_log_payloads_show_the_request_and_effective_training_config(tmp_pa
     )
     agent_cfg = SimpleNamespace(
         num_steps_per_env=50,
+        max_iterations=100_000,
         save_interval=200,
+        policy=SimpleNamespace(
+            actor_hidden_dims=[512, 256, 256],
+            critic_hidden_dims=[512, 256, 256],
+            estimator_hidden_dims=[256, 256],
+            estimator_target_hidden_dims=[256, 256],
+            estimator_latent_dim=32,
+            estimator_num_prototypes=64,
+        ),
         algorithm=SimpleNamespace(
             learning_rate=1e-3,
             schedule="adaptive",
             entropy_coef=0.01,
-            estimator_learning_rate=1e-3,
+            estimator_learning_rate=None,
         ),
     )
 
@@ -116,19 +125,29 @@ def test_live_log_payloads_show_the_request_and_effective_training_config(tmp_pa
                 "height_hold": 1.0 / 3.0,
                 "stand": 1.0 / 6.0,
             },
-            "height_range": [0.30, 1.01],
+            "height_range": [0.40, 1.01],
             "stand_height": 1.01,
             "lin_vel_x_range": [-0.8, 1.2],
             "lin_vel_y_range": [-0.5, 0.5],
             "ang_vel_yaw_range": [-0.8, 0.8],
         },
+        "network": {
+            "actor_hidden_dims": [512, 256, 256],
+            "critic_hidden_dims": [512, 256, 256],
+            "estimator_hidden_dims": [256, 256],
+            "estimator_target_hidden_dims": [256, 256],
+            "estimator_latent_dim": 32,
+            "estimator_num_prototypes": 64,
+        },
         "ppo": {
             "num_steps_per_env": 50,
+            "max_iterations": 100_000,
             "save_interval": 200,
             "learning_rate": 1e-3,
             "schedule": "adaptive",
             "entropy_coef": 0.01,
-            "estimator_learning_rate": 1e-3,
+            "estimator_learning_rate": None,
+            "estimator_lr_follows_policy": True,
         },
     }
 

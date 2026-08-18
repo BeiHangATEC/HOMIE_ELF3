@@ -69,8 +69,8 @@ REWARD_SCALES = {
     "feet_clearance": -0.25,
     "feet_distance_lateral": 0.5,
     "knee_distance_lateral": 1.0,
-    "feet_ground_parallel": -0.05,
-    "feet_parallel": -0.075,
+    "feet_ground_parallel": -2.0,
+    "feet_parallel": -3.0,
     "smoothness": -0.05,
     "joint_power": -2e-5,
     "feet_stumble": -1.5,
@@ -99,22 +99,6 @@ def _select(tensor: torch.Tensor, indices: torch.Tensor | Sequence[int]) -> torc
     return tensor.index_select(-1, _indices(indices, tensor))
 
 
-def _crouching(modes: torch.Tensor | None, like: torch.Tensor) -> torch.Tensor:
-    """1.0 where the commanded mode is a crouch, else 0.0."""
-    if modes is None:
-        return torch.zeros_like(like)
-    return (modes >= 2).to(like.dtype)
-
-
-def _mode_shape(raw: torch.Tensor, modes: torch.Tensor | None) -> torch.Tensor:
-    """Offset velocity tracking down by 1 while crouching.
-
-    Crouch episodes command zero velocity, so the exponential would otherwise
-    pay full reward for standing still and swamp the height term.
-    """
-    return raw - _crouching(modes, raw)
-
-
 # --------------------------------------------------------------------------
 # Command tracking
 # --------------------------------------------------------------------------
@@ -127,7 +111,7 @@ def tracking_x_vel(
     raw = torch.exp(
         -torch.square(commands[:, 0] - base_lin_vel[:, 0]) / tracking_sigma
     )
-    return _mode_shape(raw, modes)
+    return raw
 
 
 def tracking_y_vel(
@@ -139,7 +123,7 @@ def tracking_y_vel(
     raw = torch.exp(
         -torch.square(commands[:, 1] - base_lin_vel[:, 1]) / tracking_sigma
     )
-    return _mode_shape(raw, modes)
+    return raw
 
 
 def tracking_ang_vel(
@@ -151,7 +135,7 @@ def tracking_ang_vel(
     raw = torch.exp(
         -torch.square(commands[:, 2] - base_ang_vel[:, 2]) / tracking_sigma
     )
-    return _mode_shape(raw, modes)
+    return raw
 
 
 def tracking_base_height(
@@ -173,8 +157,7 @@ def tracking_base_height(
     raw = torch.exp(
         -4.0 * torch.abs(base_height - commanded_height + ankle_sole_distance)
     )
-    # Crouching is the harder skill, so it is worth double while crouching.
-    return raw * (1.0 + _crouching(modes, raw))
+    return raw
 
 
 # --------------------------------------------------------------------------

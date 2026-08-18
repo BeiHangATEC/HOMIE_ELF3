@@ -110,6 +110,7 @@ def effective_config_log_payload(
 ) -> dict[str, Any]:
     """Return the stable training settings users need beside live progress."""
     algorithm = agent_cfg.algorithm
+    policy = agent_cfg.policy
     return {
         "event": "ELF3_SINGLE_STAGE_EFFECTIVE_CONFIG",
         "task_id": TASK_ID,
@@ -126,13 +127,23 @@ def effective_config_log_payload(
             "lin_vel_y_range": list(env_cfg.lin_vel_y_range),
             "ang_vel_yaw_range": list(env_cfg.ang_vel_yaw_range),
         },
+        "network": {
+            "actor_hidden_dims": list(policy.actor_hidden_dims),
+            "critic_hidden_dims": list(policy.critic_hidden_dims),
+            "estimator_hidden_dims": list(policy.estimator_hidden_dims),
+            "estimator_target_hidden_dims": list(policy.estimator_target_hidden_dims),
+            "estimator_latent_dim": policy.estimator_latent_dim,
+            "estimator_num_prototypes": policy.estimator_num_prototypes,
+        },
         "ppo": {
             "num_steps_per_env": agent_cfg.num_steps_per_env,
+            "max_iterations": agent_cfg.max_iterations,
             "save_interval": agent_cfg.save_interval,
             "learning_rate": algorithm.learning_rate,
             "schedule": algorithm.schedule,
             "entropy_coef": algorithm.entropy_coef,
             "estimator_learning_rate": algorithm.estimator_learning_rate,
+            "estimator_lr_follows_policy": algorithm.estimator_learning_rate is None,
         },
     }
 

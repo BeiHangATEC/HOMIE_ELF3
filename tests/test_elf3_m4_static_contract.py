@@ -104,7 +104,7 @@ def test_agent_cfg_derives_canonical_dimensions_and_public_class_names():
     assert cfg.class_name == "HIMOnPolicyRunner"
     assert cfg.seed == 42
     assert cfg.device == "cuda:0"
-    assert cfg.max_iterations == 50_000
+    assert cfg.max_iterations == 100_000
     assert cfg.clip_actions == 100.0
     assert cfg.experiment_name == "elf3_homie_him_isaaclab"
     assert cfg.algorithm.class_name == "HIMPPO"
@@ -118,8 +118,14 @@ def test_agent_cfg_derives_canonical_dimensions_and_public_class_names():
     assert C.num_one_step_actor_obs() == 78
     assert C.num_one_step_critic_obs() == 81
     assert C.num_actor_obs() == 468
+    assert cfg.policy.actor_hidden_dims == [512, 256, 256]
+    assert cfg.policy.critic_hidden_dims == [512, 256, 256]
+    assert cfg.policy.estimator_hidden_dims == [256, 256]
+    assert cfg.policy.estimator_target_hidden_dims == [256, 256]
+    assert cfg.policy.estimator_latent_dim == 32
+    assert cfg.policy.estimator_num_prototypes == 64
     assert cfg.algorithm.learning_rate == 1.0e-3
-    assert cfg.algorithm.estimator_learning_rate == 1.0e-3
+    assert cfg.algorithm.estimator_learning_rate is None
     assert cfg.algorithm.schedule == "adaptive"
     assert cfg.algorithm.entropy_coef == 0.01
     assert cfg.algorithm.rnd_cfg is None

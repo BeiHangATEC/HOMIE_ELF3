@@ -36,8 +36,8 @@ class Elf3HIMPolicyCfg:
     actor_history_length: int = C.NUM_ACTOR_HISTORY
     num_one_step_critic_obs: int = field(default_factory=C.num_one_step_critic_obs)
     critic_history_length: int = C.NUM_CRITIC_HISTORY
-    actor_hidden_dims: list[int] = field(default_factory=lambda: [512, 256, 128])
-    critic_hidden_dims: list[int] = field(default_factory=lambda: [512, 256, 128])
+    actor_hidden_dims: list[int] = field(default_factory=lambda: [512, 256, 256])
+    critic_hidden_dims: list[int] = field(default_factory=lambda: [512, 256, 256])
     estimator_hidden_dims: list[int] = field(default_factory=lambda: [256, 256])
     estimator_target_hidden_dims: list[int] = field(default_factory=lambda: [256, 256])
     estimator_latent_dim: int = C.NUM_ESTIMATOR_LATENT
@@ -71,7 +71,7 @@ class Elf3HIMAlgorithmCfg:
     schedule: str = "adaptive"
     desired_kl: float = 0.01
     normalize_advantage_per_mini_batch: bool = False
-    estimator_learning_rate: float = 1.0e-3
+    estimator_learning_rate: float | None = None
     estimator_max_grad_norm: float = 10.0
     use_flip: bool = True
     mirror: dict[str, list[int]] = field(default_factory=_mirror_spec)
@@ -84,7 +84,7 @@ class Elf3HIMRunnerCfg:
     seed: int = 42
     device: str = "cuda:0"
     num_steps_per_env: int = 50
-    max_iterations: int = 50_000
+    max_iterations: int = 100_000
     clip_actions: float = 100.0
     experiment_name: str = "elf3_homie_him_isaaclab"
     save_interval: int = 200

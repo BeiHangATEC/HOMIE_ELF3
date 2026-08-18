@@ -31,6 +31,11 @@ def test_every_named_term_has_a_scale():
     assert len(set(R.REWARD_NAMES)) == len(R.REWARD_NAMES)
 
 
+def test_sole_parallel_scales_match_g1():
+    assert R.REWARD_SCALES["feet_ground_parallel"] == -2.0
+    assert R.REWARD_SCALES["feet_parallel"] == -3.0
+
+
 def test_every_named_term_has_an_implementation():
     for name in R.REWARD_NAMES:
         assert callable(getattr(R, name)), f"{name} has no implementation"
@@ -66,14 +71,14 @@ def test_velocity_tracking_peaks_when_the_command_is_met():
     assert wrong.item() < exact.item()
 
 
-def test_velocity_tracking_is_offset_down_while_crouching():
-    """Crouch episodes command zero velocity, so a perfect exp() would pay
-    full reward for standing still and swamp the height term."""
+def test_zero_velocity_tracking_gets_the_g1_baseline_in_every_mode():
     vel = torch.zeros(1, 3)
     walking = R.tracking_x_vel(_cmd(), vel, 0.25, modes=torch.tensor([0]))
+    standing = R.tracking_x_vel(_cmd(), vel, 0.25, modes=torch.tensor([1]))
     crouching = R.tracking_x_vel(_cmd(), vel, 0.25, modes=torch.tensor([2]))
     assert walking.item() == pytest.approx(1.0)
-    assert crouching.item() == pytest.approx(0.0)
+    assert standing.item() == pytest.approx(1.0)
+    assert crouching.item() == pytest.approx(1.0)
 
 
 def test_height_tracking_peaks_at_the_commanded_height():
@@ -95,7 +100,7 @@ def test_height_tracking_peaks_at_the_commanded_height():
     assert bad.item() < good.item()
 
 
-def test_height_tracking_doubles_while_crouching():
+def test_height_tracking_uses_the_g1_value_in_every_mode():
     kwargs = dict(
         root_height=torch.tensor([1.0]),
         feet_height=torch.zeros(1, 2),
@@ -103,8 +108,11 @@ def test_height_tracking_doubles_while_crouching():
         ankle_sole_distance=0.02,
     )
     walk = R.tracking_base_height(**kwargs, modes=torch.tensor([0]))
+    stand = R.tracking_base_height(**kwargs, modes=torch.tensor([1]))
     crouch = R.tracking_base_height(**kwargs, modes=torch.tensor([2]))
-    assert crouch.item() == pytest.approx(2.0 * walk.item())
+    assert walk.item() == pytest.approx(1.0)
+    assert stand.item() == pytest.approx(1.0)
+    assert crouch.item() == pytest.approx(1.0)
 
 
 def test_height_tracking_uses_the_higher_foot():

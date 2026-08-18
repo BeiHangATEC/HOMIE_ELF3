@@ -12,5 +12,5 @@ class Elf3SingleStageEnvCfg(Elf3HomieEnvCfg):
     """Use the G1 command mix over ELF3's full requested height range."""
 
     command_profile = "g1_single_stage"
-    single_stage_height_range = (0.30, 1.01)
+    single_stage_height_range = (0.40, 1.01)
     single_stage_stand_height = 1.01
