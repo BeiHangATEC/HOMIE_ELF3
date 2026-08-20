@@ -8,4 +8,5 @@ pydelatin==0.2.8
 pyfqmr==0.2.1
 ipdb
 wandb
+swanlab>=0.7.20
 onnxruntime

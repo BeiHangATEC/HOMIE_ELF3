@@ -111,6 +111,10 @@ class LeggedRobotCfg(BaseConfig):
         penalize_contacts_on = []
         terminate_after_contacts_on = []
         curriculum_joints = []
+        policy_dof_names = None
+        upper_body_dof_names = None
+        left_hand_name = "left_hand_palm_link"
+        right_hand_name = "right_hand_palm_link"
         disable_gravity = False
         collapse_fixed_joints = False # merge bodies connected by fixed joints. Specific fixed joints can be kept by adding " <... dont_collapse="true">
         fix_base_link = False # fixe the base of the robot

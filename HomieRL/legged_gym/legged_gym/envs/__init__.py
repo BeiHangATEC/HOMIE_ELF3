@@ -32,8 +32,10 @@ from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 from .base.legged_robot import LeggedRobot
 
 from legged_gym.envs.g1.g1_29dof_config import G1RoughCfg, G1RoughCfgPPO
+from legged_gym.envs.g1.elf3_config import Elf3RoughCfg, Elf3RoughCfgPPO
 import os
 
 from legged_gym.utils.task_registry import task_registry
 
 task_registry.register( "g1", LeggedRobot, G1RoughCfg(), G1RoughCfgPPO() )
+task_registry.register( "elf3", LeggedRobot, Elf3RoughCfg(), Elf3RoughCfgPPO() )

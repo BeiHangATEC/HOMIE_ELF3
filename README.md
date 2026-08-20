@@ -36,6 +36,7 @@
 - [🏠 About](#-about)
 - [🔥 News](#-news)
 - [📚 Usage](#-usage)
+- [🤖 ELF3](#-elf3)
 - [📝 TODO List](#-todo)
 - [🔗 Citation](#-citation)
 - [📄 License](#-license)
@@ -83,6 +84,87 @@ https://github.com/OpenRobotLab/Homie.git
 Then you can follow the README.md in each sub-repostory to install all three parts or just one of them.
 
 If you have any questions about the usage of this repository, please feel free to drop an e-mail at **elgceben@gmail.com**, we will respond to it as soon as possible. Or, you can join our discussion wechat group (However, it has over 200 people now, if you would like to join, please add wechat: elgceben with info like "I want to join HOMIE discussion wechat group")
+
+## 🤖 ELF3
+<a name="-elf3"></a>
+
+The `elf3` Isaac Gym task reuses the G1 `LeggedRobot` environment and HIM PPO implementation while adapting the robot asset, joint layout, height commands, observation size, and logger.
+
+### Changes from G1
+
+| Item | G1 | ELF3 |
+|---|---|---|
+| Robot asset | `g1_description/g1.urdf` | `elf3_description/urdf/elf3.urdf` |
+| Initial base height | `0.75 m` | `1.01 m` |
+| Height-task range | `0.24-0.74 m` | `0.30-1.01 m` |
+| Base-height config | `0.74 m` | `1.035 m` |
+| Foot-clearance target | `0.14 m` | `0.181 m` |
+| Total DOFs / policy actions | `27 / 12` | `28 / 12` |
+| Actor / critic observations | `456 / 79` | `468 / 81` |
+| Policy joint selection | First 12 asset DOFs | Explicit 12-leg-DOF name mapping |
+| Default logger | Weights & Biases | SwanLab cloud project `HomieRL-ELF3` |
+
+The reward weights, domain-randomization ranges, terrain and noise settings, and HIM PPO hyperparameters are unchanged. ELF3 sets `commands.height_target=1.01`; the current height reward follows this command, so `1.01 m`, rather than the separate `1.035 m` base-height field, is the normal standing and walking command.
+
+### Train
+
+Activate the installed HomieRL environment, authenticate SwanLab once, and start the registered `elf3` task from the `HomieRL` directory:
+
+```
+conda activate homierl
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+swanlab login
+cd path_to_OpenHomie/HomieRL
+python legged_gym/legged_gym/scripts/train.py --task elf3 --num_envs 4096 --headless --experiment_name elf3 --run_name elf3_policy --rl_device cuda:0
+```
+
+ELF3 uses SwanLab by default and also keeps local logs under `legged_gym/logs/elf3/`. The default run is `100000` iterations, collects `50` steps per environment per iteration, and saves a checkpoint every `200` iterations. Add `--max_iterations N` to override the run length.
+
+### Play in Isaac Gym
+
+`play.py` accepts four motion values in its final `play(...)` call and writes them before every simulation step. They are source-configured targets, not W/A/S/D or arrow-key controls.
+
+| Value | Meaning | ELF3 training range |
+|---|---|---|
+| `x_vel` | Body-frame forward (`+`) or backward (`-`) velocity | `-0.8` to `1.2 m/s` |
+| `y_vel` | Body-frame left (`+`) or right (`-`) velocity | `-0.5` to `0.5 m/s` |
+| `yaw_vel` | Left (`+`) or right (`-`) yaw rate | `-0.8` to `0.8 rad/s` |
+| `height` | Base-height command | `0.30` to `1.01 m` |
+
+For example, use the following final call in `legged_gym/legged_gym/scripts/play.py` to command ELF3 to walk forward at `0.5 m/s` while standing at `1.01 m`:
+
+```
+play(args, x_vel=0.5, y_vel=0.0, yaw_vel=0.0, height=1.01)
+```
+
+Use zero velocity with `height=1.01` to stand, a negative `x_vel` to walk backward, a non-zero `y_vel` to move laterally, a non-zero `yaw_vel` to turn, or `height=0.30` to command the lowest trained squat. The current repository default is zero velocity with `height=0.24`, which is a low squat for G1 and is outside ELF3's trained height range; change it before playing ELF3. The shared environment still runs its four-second command-resampling callback, so a resampled command can appear in one returned observation before the next play-loop iteration restores these values.
+
+The current checkpoint loader expects `./example_model.pt` relative to the `HomieRL` working directory. Select a checkpoint and run:
+
+```
+cd path_to_OpenHomie/HomieRL
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+export ELF3_CHECKPOINT=/absolute/path/to/model_ITERATION.pt
+cp "$ELF3_CHECKPOINT" ./example_model.pt
+python legged_gym/legged_gym/scripts/play.py --task elf3 --num_envs 32 --resume --experiment_name elf3 --rl_device cuda:0
+```
+
+The policy controls 12 leg joints in left-then-right `hip_y`, `hip_x`, `hip_z`, knee, `ankle_y`, and `ankle_x` order. Each policy output is scaled by `0.25` around the default joint angle before the shared controller computes the leg command. During Isaac Gym play, the environment continues to generate random upper-body position targets. `Esc` exits the viewer and `V` toggles viewer synchronization. With `EXPORT_POLICY=True`, play also exports a TorchScript policy to `legged_gym/logs/elf3/exported/policies/policy.pt`.
+
+### Sim2Sim in MuJoCo
+
+The current MuJoCo Sim2Sim path is G1-only. It hard-codes `MujocoDeploy/g1.yaml`, requires the G1 MJCF model, and assumes the first 12 model joints are the policy-controlled legs. Its default command is `[0.0, 0.0, 0.0]` with `height_cmd: 0.34`, so G1 performs a low stationary squat rather than walking. There is no keyboard locomotion control; change `cmd_init` and `height_cmd` in `g1.yaml` before launch.
+
+After placing the exported G1 TorchScript file at the `policy_path` configured in `g1.yaml`, run:
+
+```
+conda activate homierl
+pip install mujoco==3.2.3
+cd path_to_OpenHomie/MujocoDeploy
+python mujoco_deploy_g1.py
+```
+
+ELF3 Sim2Sim is **not yet runnable in this repository**, so there is currently no valid ELF3 Sim2Sim command. Do not point `g1.yaml` at an ELF3 policy: ELF3 needs a MuJoCo model and YAML configuration with `468` observations and a compatible `0.30-1.01 m` height command, plus joint indexing or model ordering that preserves its explicit 12 policy DOFs and 16 upper-body DOFs. Name-based indexing is the preferred robust implementation. The current Sim2Sim loader consumes the TorchScript `policy.pt` exported by play, not an ONNX file.
 
 
 

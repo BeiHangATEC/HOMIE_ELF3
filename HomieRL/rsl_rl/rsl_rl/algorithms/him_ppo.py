@@ -236,6 +236,13 @@ class HIMPPO:
             return mean_value_loss, mean_surrogate_loss, estimation_loss, swap_loss, 0, 0
     
     def flip_g1_actor_obs(self, obs):
+        if self.actor_critic.num_one_step_obs == 78:
+            return self._flip_elf3_observations(
+                obs,
+                self.actor_critic.actor_history_length,
+                self.actor_critic.num_one_step_obs,
+                include_base_linear_velocity=False,
+            )
         proprioceptive_obs = torch.clone(obs[:, :self.actor_critic.num_one_step_obs * self.actor_critic.actor_history_length])
         proprioceptive_obs = proprioceptive_obs.view(-1, self.actor_critic.actor_history_length, self.actor_critic.num_one_step_obs)
         
@@ -334,6 +341,13 @@ class HIMPPO:
         return flipped_proprioceptive_obs.view(-1, self.actor_critic.num_one_step_obs * self.actor_critic.actor_history_length).detach()                                                                                                                                                                                                                                             
     
     def flip_g1_critic_obs(self, critic_obs):
+        if self.actor_critic.num_one_step_critic_obs == 81:
+            return self._flip_elf3_observations(
+                critic_obs,
+                self.actor_critic.critic_history_length,
+                self.actor_critic.num_one_step_critic_obs,
+                include_base_linear_velocity=True,
+            )
         proprioceptive_obs = torch.clone(critic_obs[:, :self.actor_critic.num_one_step_critic_obs * self.actor_critic.critic_history_length])
         proprioceptive_obs = proprioceptive_obs.view(-1, self.actor_critic.critic_history_length, self.actor_critic.num_one_step_critic_obs)
         flipped_proprioceptive_obs = torch.zeros_like(proprioceptive_obs)
@@ -451,3 +465,45 @@ class HIMPPO:
         flipped_actions[:, 10] =  actions[:, 4]        # 10 "right_ankle_pitch_joint",
         flipped_actions[:, 11] = -actions[:, 5]        # 11 "right_ankle_roll_joint",
         return flipped_actions.detach()
+
+    def _flip_elf3_observations(self, observations, history_length, one_step_obs, include_base_linear_velocity):
+        proprioceptive_obs = torch.clone(observations[:, :one_step_obs * history_length])
+        proprioceptive_obs = proprioceptive_obs.view(-1, history_length, one_step_obs)
+        flipped_obs = torch.zeros_like(proprioceptive_obs)
+
+        base_signs = proprioceptive_obs.new_tensor([1., -1., -1., 1., -1., 1., -1., 1., -1., 1.])
+        flipped_obs[:, :, :10] = proprioceptive_obs[:, :, :10] * base_signs
+
+        lower_indices = [6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4, 5]
+        lower_signs = [1., -1., -1., 1., 1., -1.] * 2
+        arm_indices = [21, 22, 23, 24, 25, 26, 27, 14, 15, 16, 17, 18, 19, 20]
+        arm_signs = [1., -1., -1., 1., -1., 1., -1.] * 2
+        dof_indices = lower_indices + [12, 13] + arm_indices
+        dof_signs = proprioceptive_obs.new_tensor(lower_signs + [1., -1.] + arm_signs)
+        dof_indices = torch.tensor(dof_indices, dtype=torch.long, device=proprioceptive_obs.device)
+
+        num_dofs = 28
+        dof_pos_start = 10
+        dof_vel_start = dof_pos_start + num_dofs
+        action_start = dof_vel_start + num_dofs
+        flipped_obs[:, :, dof_pos_start:dof_vel_start] = (
+            proprioceptive_obs[:, :, dof_pos_start:dof_vel_start][:, :, dof_indices] * dof_signs
+        )
+        flipped_obs[:, :, dof_vel_start:action_start] = (
+            proprioceptive_obs[:, :, dof_vel_start:action_start][:, :, dof_indices] * dof_signs
+        )
+
+        action_indices = torch.tensor(lower_indices, dtype=torch.long, device=proprioceptive_obs.device)
+        action_signs = proprioceptive_obs.new_tensor(lower_signs)
+        flipped_obs[:, :, action_start:action_start + 12] = (
+            proprioceptive_obs[:, :, action_start:action_start + 12][:, :, action_indices] * action_signs
+        )
+
+        if include_base_linear_velocity:
+            linear_velocity_start = action_start + 12
+            linear_velocity_signs = proprioceptive_obs.new_tensor([1., -1., 1.])
+            flipped_obs[:, :, linear_velocity_start:linear_velocity_start + 3] = (
+                proprioceptive_obs[:, :, linear_velocity_start:linear_velocity_start + 3] * linear_velocity_signs
+            )
+
+        return flipped_obs.view(-1, one_step_obs * history_length).detach()
