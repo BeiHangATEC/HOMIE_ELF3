@@ -99,8 +99,8 @@ The `elf3` Isaac Gym task reuses the G1 `LeggedRobot` environment and HIM PPO im
 | Height-task range | `0.24-0.74 m` | `0.30-1.01 m` |
 | Base-height config | `0.74 m` | `1.035 m` |
 | Foot-clearance target | `0.14 m` | `0.181 m` |
-| Total DOFs / policy actions | `27 / 12` | `28 / 12` |
-| Actor / critic observations | `456 / 79` | `468 / 81` |
+| Total DOFs / policy actions | `27 / 12` | `26 / 12` |
+| Actor / critic observations | `456 / 79` | `444 / 77` |
 | Policy joint selection | First 12 asset DOFs | Explicit 12-leg-DOF name mapping |
 | Default logger | Weights & Biases | SwanLab cloud project `HomieRL-ELF3` |
 
@@ -164,7 +164,7 @@ cd path_to_OpenHomie/MujocoDeploy
 python mujoco_deploy_g1.py
 ```
 
-ELF3 Sim2Sim is **not yet runnable in this repository**, so there is currently no valid ELF3 Sim2Sim command. Do not point `g1.yaml` at an ELF3 policy: ELF3 needs a MuJoCo model and YAML configuration with `468` observations and a compatible `0.30-1.01 m` height command, plus joint indexing or model ordering that preserves its explicit 12 policy DOFs and 16 upper-body DOFs. Name-based indexing is the preferred robust implementation. The current Sim2Sim loader consumes the TorchScript `policy.pt` exported by play, not an ONNX file.
+ELF3 Sim2Sim is **not yet runnable in this repository**, so there is currently no valid ELF3 Sim2Sim command. Do not point `g1.yaml` at an ELF3 policy: ELF3 needs a MuJoCo model and YAML configuration with `444` observations and a compatible `0.30-1.01 m` height command, plus joint indexing or model ordering that preserves its explicit 12 policy DOFs and 14 upper-body DOFs. Name-based indexing is the preferred robust implementation. The current Sim2Sim loader consumes the TorchScript `policy.pt` exported by play, not an ONNX file.
 
 
 

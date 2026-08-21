@@ -47,8 +47,6 @@ class Elf3RoughCfg( LeggedRobotCfg ):
            'r_knee_y_joint' : 0.3,
            'r_ankle_y_joint': -0.2,
            'r_ankle_x_joint' : 0,
-            "waist_y_joint": 0.,
-            "waist_z_joint": 0.,
             "l_shoulder_y_joint": 0.,
             "l_shoulder_x_joint": 0.,
             "l_shoulder_z_joint": 0.,
@@ -76,7 +74,6 @@ class Elf3RoughCfg( LeggedRobotCfg ):
                      'knee': 150,
                      'ankle': 40,
                      
-                     "waist": 300,
                      "shoulder": 200,
                      "wrist": 20,
                      "elbow": 100,
@@ -88,7 +85,6 @@ class Elf3RoughCfg( LeggedRobotCfg ):
                      'hip_y': 2,
                      'knee': 4,
                      'ankle': 2,
-                     "waist": 5,
                      "shoulder": 4,
                      "wrist": 0.5,
                      "elbow": 1,
@@ -129,7 +125,6 @@ class Elf3RoughCfg( LeggedRobotCfg ):
             'r_hip_y_joint', 'r_hip_x_joint', 'r_hip_z_joint', 'r_knee_y_joint', 'r_ankle_y_joint', 'r_ankle_x_joint',
         ]
         upper_body_dof_names = [
-            'waist_y_joint', 'waist_z_joint',
             'l_shoulder_y_joint', 'l_shoulder_x_joint', 'l_shoulder_z_joint', 'l_elbow_y_joint', 'l_wrist_x_joint', 'l_wrist_y_joint', 'l_wrist_z_joint',
             'r_shoulder_y_joint', 'r_shoulder_x_joint', 'r_shoulder_z_joint', 'r_elbow_y_joint', 'r_wrist_x_joint', 'r_wrist_y_joint', 'r_wrist_z_joint',
         ]
@@ -250,8 +245,8 @@ class Elf3RoughCfg( LeggedRobotCfg ):
     class env( LeggedRobotCfg.rewards ):
         num_envs = 4096
         num_actions = 12
-        num_dofs = 28
-        num_one_step_observations = 2 * num_dofs + 10 + num_actions # 56 + 10 + 12 = 78
+        num_dofs = 26
+        num_one_step_observations = 2 * num_dofs + 10 + num_actions # 52 + 10 + 12 = 74
         num_one_step_privileged_obs = num_one_step_observations + 3
         num_actor_history = 6
         num_critic_history = 1

@@ -236,7 +236,7 @@ class HIMPPO:
             return mean_value_loss, mean_surrogate_loss, estimation_loss, swap_loss, 0, 0
     
     def flip_g1_actor_obs(self, obs):
-        if self.actor_critic.num_one_step_obs == 78:
+        if self.actor_critic.num_one_step_obs == 74:
             return self._flip_elf3_observations(
                 obs,
                 self.actor_critic.actor_history_length,
@@ -341,7 +341,7 @@ class HIMPPO:
         return flipped_proprioceptive_obs.view(-1, self.actor_critic.num_one_step_obs * self.actor_critic.actor_history_length).detach()                                                                                                                                                                                                                                             
     
     def flip_g1_critic_obs(self, critic_obs):
-        if self.actor_critic.num_one_step_critic_obs == 81:
+        if self.actor_critic.num_one_step_critic_obs == 77:
             return self._flip_elf3_observations(
                 critic_obs,
                 self.actor_critic.critic_history_length,
@@ -476,13 +476,13 @@ class HIMPPO:
 
         lower_indices = [6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4, 5]
         lower_signs = [1., -1., -1., 1., 1., -1.] * 2
-        arm_indices = [21, 22, 23, 24, 25, 26, 27, 14, 15, 16, 17, 18, 19, 20]
+        arm_indices = [19, 20, 21, 22, 23, 24, 25, 12, 13, 14, 15, 16, 17, 18]
         arm_signs = [1., -1., -1., 1., -1., 1., -1.] * 2
-        dof_indices = lower_indices + [12, 13] + arm_indices
-        dof_signs = proprioceptive_obs.new_tensor(lower_signs + [1., -1.] + arm_signs)
+        dof_indices = lower_indices + arm_indices
+        dof_signs = proprioceptive_obs.new_tensor(lower_signs + arm_signs)
         dof_indices = torch.tensor(dof_indices, dtype=torch.long, device=proprioceptive_obs.device)
 
-        num_dofs = 28
+        num_dofs = 26
         dof_pos_start = 10
         dof_vel_start = dof_pos_start + num_dofs
         action_start = dof_vel_start + num_dofs

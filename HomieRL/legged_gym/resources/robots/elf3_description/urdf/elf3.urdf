@@ -45,12 +45,10 @@
       </geometry>
     </collision> -->
   </link>
-  <joint name="waist_y_joint" type="revolute">
+  <joint name="waist_y_joint" type="fixed">
     <origin xyz="0 0 -0.2265" rpy="0 0 0"/>
     <parent link="torso_link"/>
     <child link="waist_y_link"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-0.5236" upper="0.5236" effort="90" velocity="20"/>
   </joint>
   <link name="waist_x_link">
     <inertial>
@@ -101,12 +99,10 @@
       </geometry>
     </collision> -->
   </link>
-  <joint name="waist_z_joint" type="revolute">
+  <joint name="waist_z_joint" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <parent link="waist_x_link"/>
     <child link="waist_z_link"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-2.8798" upper="2.8798" effort="150" velocity="20"/>
   </joint>
   <link name="l_hip_y_link">
     <inertial>
