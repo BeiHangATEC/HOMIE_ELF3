@@ -74,3 +74,6 @@ build
 */build
 
 */__pycache__
+
+# Local Git worktrees
+.worktrees/
