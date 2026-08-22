@@ -108,17 +108,27 @@ The reward weights, domain-randomization ranges, terrain and noise settings, and
 
 ### Train
 
+ELF3 samples height tracking and velocity tracking for `45%` of time steps each, with the remaining `10%` used for standing. Within height-tracking tasks, the `[0.30, 0.50] m` and `[0.50, 1.01] m` bands remain equally likely.
+
 Activate the installed HomieRL environment, authenticate SwanLab once, and start the registered `elf3` task from the `HomieRL` directory:
 
-```
+```bash
 conda activate homierl
+export PATH="$CONDA_PREFIX/bin:$PATH"
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 swanlab login
-cd path_to_OpenHomie/HomieRL
-python legged_gym/legged_gym/scripts/train.py --task elf3 --num_envs 4096 --headless --experiment_name elf3 --run_name elf3_policy --rl_device cuda:0
+cd /path/to/HOMIE_ELF3/HomieRL
+python legged_gym/legged_gym/scripts/train.py \
+  --task elf3 \
+  --num_envs 4096 \
+  --headless \
+  --experiment_name elf3_formal \
+  --run_name elf3_task_mix_45_45_10_v1 \
+  --max_iterations 100000 \
+  --rl_device cuda:0
 ```
 
-ELF3 uses SwanLab by default and also keeps local logs under `legged_gym/logs/elf3/`. The default run is `100000` iterations, collects `50` steps per environment per iteration, and saves a checkpoint every `200` iterations. Add `--max_iterations N` to override the run length.
+ELF3 uses SwanLab by default and also keeps local logs under `legged_gym/logs/elf3_formal/`. The default run collects `50` steps per environment per iteration and saves a checkpoint every `200` iterations. Add `--max_iterations N` to override the documented run length.
 
 ### Play in Isaac Gym
 
@@ -126,9 +136,9 @@ ELF3 uses SwanLab by default and also keeps local logs under `legged_gym/logs/el
 
 | Value | Meaning | ELF3 training range |
 |---|---|---|
-| `x_vel` | Body-frame forward (`+`) or backward (`-`) velocity | `-0.8` to `1.2 m/s` |
+| `x_vel` | Body-frame forward (`+`) or backward (`-`) velocity | `-0.5` to `0.5 m/s` |
 | `y_vel` | Body-frame left (`+`) or right (`-`) velocity | `-0.5` to `0.5 m/s` |
-| `yaw_vel` | Left (`+`) or right (`-`) yaw rate | `-0.8` to `0.8 rad/s` |
+| `yaw_vel` | Left (`+`) or right (`-`) yaw rate | `-0.5` to `0.5 rad/s` |
 | `height` | Base-height command | `0.30` to `1.01 m` |
 
 For example, use the following final call in `legged_gym/legged_gym/scripts/play.py` to command ELF3 to walk forward at `0.5 m/s` while standing at `1.01 m`:

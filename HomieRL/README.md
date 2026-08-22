@@ -125,7 +125,7 @@ python legged_gym/legged_gym/scripts/train.py \
   --num_envs 4096 \
   --headless \
   --experiment_name elf3_formal \
-  --run_name elf3_height_lock_v1 \
+  --run_name elf3_task_mix_45_45_10_v1 \
   --max_iterations 100000 \
   --rl_device cuda:0
 ```
@@ -186,9 +186,9 @@ The ELF3 policy controls 12 leg joints and observes all 28 movable joints. The r
 
 The default command distribution is:
 
-- height tracking: `50%` of time steps;
-- velocity tracking: `1/3` of time steps;
-- standing: `1/6` of time steps;
+- height tracking: `45%` of time steps;
+- velocity tracking: `45%` of time steps;
+- standing: `10%` of time steps;
 - within height-tracking tasks, `[0.30, 0.50] m` and `[0.50, 1.01] m` are sampled with equal probability;
 - x/y/yaw velocity components are each limited to `[-0.5, 0.5]`.
 

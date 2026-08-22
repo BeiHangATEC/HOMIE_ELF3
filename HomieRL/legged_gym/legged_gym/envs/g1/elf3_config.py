@@ -109,9 +109,9 @@ class Elf3RoughCfg( LeggedRobotCfg ):
         heading_to_ang_vel = False
         height_target = 1.01
         use_task_distribution = True
-        height_tracking_probability = 0.5
-        velocity_tracking_probability = 1.0 / 3.0
-        standing_probability = 1.0 / 6.0
+        height_tracking_probability = 0.45
+        velocity_tracking_probability = 0.45
+        standing_probability = 0.10
         height_sampling_bands = [
             [0.30, 0.50, 0.5],
             [0.50, 1.01, 0.5],
