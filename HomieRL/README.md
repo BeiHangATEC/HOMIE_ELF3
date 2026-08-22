@@ -202,20 +202,24 @@ ELF3 logs the time-step fractions spent in each task plus `Episode/height_mae`, 
 
 ### Play
 
+The repository includes the latest ELF3 formal-training checkpoint at `pretrained/elf3/model_13400.pt` (iteration 13400, SHA-256 `09c59f6221c4545cdb45ddfe05003464bd67b89e092761867f53d43f8095d987`).
+
 The current play path has several runtime constraints:
 
 - `task_registry.py` loads `./example_model.pt` when resume is enabled;
-- the path is relative to the current working directory, so copy a task-compatible training checkpoint to `./example_model.pt` in the `HomieRL` root and run from that directory;
+- the path is relative to the current working directory, so for ELF3 copy `pretrained/elf3/model_13400.pt` to `./example_model.pt` in the `HomieRL` root; use a task-compatible checkpoint for G1;
 - `--load_run` and `--checkpoint` do not currently change that path;
 - x/y/yaw/height targets are values in the final `play(...)` call, not CLI options; the current script uses `x=0`, `y=0`, `yaw=0`, and `height=0.24`;
 - `EXPORT_POLICY = True`, so a successful play run also writes a JIT policy to `legged_gym/logs/<experiment_name>/exported/policies/policy.pt`.
 
-Run with a viewer:
+Run the included ELF3 checkpoint with a viewer:
 
 ```bash
-python legged_gym/legged_gym/scripts/play.py --task g1 --num_envs 1 --resume --rl_device cuda:0
+cp pretrained/elf3/model_13400.pt ./example_model.pt
 python legged_gym/legged_gym/scripts/play.py --task elf3 --num_envs 1 --resume --rl_device cuda:0
 ```
+
+For G1, place a G1-compatible checkpoint at `./example_model.pt` and replace `--task elf3` with `--task g1`.
 
 Use `--headless` for rollout/export without a viewer. Headless play does not record video or print an evaluation summary.
 
