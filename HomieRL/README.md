@@ -1,106 +1,260 @@
 <br>
-<p align="center">
-<h1 align="center"><strong>HOMIE: Humanoid Loco-Manipulation with Isomorphic Exoskeleton Cockpit (RL)</strong></h1>
-  <p align="center">
-    <a href='https://www.qingweiben.com' target='_blank'>Qingwei Ben*</a>, <a href='https://trap-1.github.io/' target='_blank'>Feiyu Jia*</a>, <a href='https://scholar.google.com/citations?user=kYrUfMoAAAAJ&hl=zh-CN' target='_blank'>Jia Zeng</a>, <a href='https://jtdong.com/' target='_blank'>Junting Dong</a>, <a href='https://dahua.site/' target='_blank'>Dahua Lin</a>, <a href='https://oceanpang.github.io/' target='_blank'>Jiangmiao Pang</a>
+<div align="center">
+  <h1><strong>HOMIE: Humanoid Loco-Manipulation with Isomorphic Exoskeleton Cockpit (RL)</strong></h1>
+  <p>
+    <a href="https://www.qingweiben.com" target="_blank">Qingwei Ben*</a>,
+    <a href="https://trap-1.github.io/" target="_blank">Feiyu Jia*</a>,
+    <a href="https://scholar.google.com/citations?user=kYrUfMoAAAAJ&hl=zh-CN" target="_blank">Jia Zeng</a>,
+    <a href="https://jtdong.com/" target="_blank">Junting Dong</a>,
+    <a href="https://dahua.site/" target="_blank">Dahua Lin</a>,
+    <a href="https://oceanpang.github.io/" target="_blank">Jiangmiao Pang</a>
     <br>
-    * Equal Controlbution
+    * Equal Contribution
     <br>
     Shanghai Artificial Intelligence Laboratory & The Chinese University of Hong Kong
-    <br>
   </p>
-</p>
 
-<div id="top" align="center">
+  [![arXiv](https://img.shields.io/badge/arXiv-2502.13013-orange)](https://arxiv.org/abs/2502.13013)
 
-[![arXiv](https://img.shields.io/badge/arXiv-2407.10943-orange)]()
-[![](https://img.shields.io/badge/Project-%F0%9F%9A%80-pink)]()
-
-<img src="./rl.png" alt="cross" width="100%" style="position: relative;">
-
+  <img src="./rl.png" alt="HOMIE reinforcement-learning framework" width="100%" />
 </div>
 
 ## 📋 Contents
 
-- [🏠 Description](#-description)
-- [📚 Installation](#-start)
-- [🔗 Citation](#-citation)
-- [📄 License](#-license)
-- [👏 Acknowledgements](#-acknowledgements)
+- [🏠 Description](#description)
+- [📚 Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Train](#train)
+  - [Logging and Checkpoints](#logging-and-checkpoints)
+  - [ELF3 Task Distribution](#elf3-task-distribution-and-upper-body-control)
+  - [Play](#play)
+  - [Export Policy to ONNX](#export-policy-to-onnx)
+  - [Troubleshooting](#troubleshooting)
+- [🔗 Citation](#citation)
+- [📄 License](#license)
+- [👏 Acknowledgements](#acknowledgements)
 
 ## 🏠 Description
-<a name="-description"></a>
-This repository is an official implementation of the reinforcement learning framework proposed by "HOMIE: Humanoid Loco-Manipulation with Isomorphic Exoskeleton Cockpit", which is developed based on [Isaac Gym](https://developer.nvidia.com/isaac-gym) and the codebase of [HIM](https://github.com/OpenRobotLab/HIMLoco). Using this codebase, you can train a Unitree G1 robot to **walk and squat under arbitrary continuous changing upper-body poses**. Our framework is not limited to this kind of humanoid robot but can be used to train other kinds of robots like Fourier GR-1 with just a little modification to the robot config file.
 
-Our framework features three key components:
+This repository is an official implementation of the reinforcement-learning framework proposed in [HOMIE: Humanoid Loco-Manipulation with Isomorphic Exoskeleton Cockpit](https://arxiv.org/abs/2502.13013). It is built on [Isaac Gym](https://developer.nvidia.com/isaac-gym) and [HIMLoco](https://github.com/OpenRobotLab/HIMLoco).
 
-* **Upper-body Pose Curriculum**: A novel style of curriculum learning that helps humanoid robots to learn to balance under any changing upper-body poses gradually.
-* **Height Reward Tracking**: Two key rewards $r_{height}$ and $r_{knee}$ that help humanoid robots learn to squat to the required height precisely and quickly.
-* **Symmetry Utilization**: We utilize the symmetry of the humanoid robot to augment the collected data and use $L_{sym}$ as one of the losses used to optimize the networks.
+The registered tasks are `g1` and `elf3`. They train humanoid policies to walk and squat under continuously changing upper-body poses.
 
-For more details about this framework, please refer to our paper.
+The framework has three key components:
+
+- **Upper-body Pose Curriculum**: gradually expands upper-body targets while the robot learns to balance.
+- **Height Reward Tracking**: uses height and knee-related rewards to track squat targets precisely.
+- **Symmetry Utilization**: augments training data with robot symmetry and optimizes the symmetry loss $L_{sym}$.
 
 ## 📚 Getting Started
-<a name="-start"></a>
+
+All commands below are intended to run from the `HomieRL` repository root.
+
 ### Prerequisites
 
-We recommend to use our code under the following environment:
+We recommend the following environment:
 
-- Ubuntu 20.04/22.04 Operating System
-- IsaacGym Preview 4.0
-  - NVIDIA GPU (RTX 2070 or higher)
-  - NVIDIA GPU Driver (recommended version 535.183)
-- Conda
-  - Python 3.8
+- Ubuntu 20.04 or 22.04
+- Isaac Gym Preview 4
+  - NVIDIA GPU (RTX 2070 or newer recommended)
+  - NVIDIA driver compatible with the installed CUDA/PyTorch build
+- Conda with Python 3.8
 
 ### Installation
-A. Create a virtual environment and install Isaac Gym:
-```
-1. conda create -n homierl python=3.8
-2. conda activate homierl
-3. cd path_to_downloaded_isaac_gym/python
-4. pip install -e .
-```
-B. Install this repository:
-```
-1. git clone https://github.com/OpenRobotLab/HomieRL.git
-2. cd HomieRL && pip install -r requirements.txt
-3. cd rsl_rl && pip install -e .
-4. cd ../legged_gym && pip install -e .
-```
+
+1. Create the Conda environment and install Isaac Gym:
+
+   ```bash
+   conda create -n homierl python=3.8
+   conda activate homierl
+   cd <path-to-isaac-gym>/python
+   pip install -e .
+   ```
+
+2. Install this repository:
+
+   ```bash
+   git clone https://github.com/OpenRobotLab/HomieRL.git
+   cd HomieRL
+   pip install -r requirements.txt
+   pip install -e rsl_rl
+   pip install -e legged_gym
+   ```
+
+3. Before training or play, make the Conda binaries and shared libraries available:
+
+   ```bash
+   conda activate homierl
+   export PATH="$CONDA_PREFIX/bin:$PATH"
+   export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+   ```
+
 ### Train
-You can train your own policy with our code by running the command below.
-```
-python legged_gym/legged_gym/scripts/train.py --task g1 --num_envs 4096 --headless --run_name my_policy --rl_device cuda:0 --sim_device cuda:0
-```
-The meanings of the parameters in this command are listed below:
-* `--task`: the training task
-* `--num_envs`: the number of parallel environments used for training
-* `--headless`: don't use the visualization window; you cannot use it to visualize the training process
-* `--run_name`: name of this training
-* `--rl_device` & `--sim_device`: which device is used for training
 
-The default logging method is [wandb](https://wandb.ai/), and you have to set the values of ***run_name***, ***experiment_name***, ***wandb_project***, and ***wandb_user*** to yours in `legged_gym/legged_gym/envs/g1/g1_29dof_config.py`. You can also change the ***logger*** to **tensorboard**. The training results will be saved in `legged_gym/logs/`.
+The training entry point is `legged_gym/legged_gym/scripts/train.py`.
 
-If you encounter the error: ***"ImportError: libpython3.8.so.1.0: cannot open shared object file: No such file or directory"***, you can run this command to solve it, where path_to_miniconda3 is the absolute path of your miniconda directory:
+#### G1
+
+G1 uses W&B by default. Set `wandb_project` and `wandb_user` in `legged_gym/legged_gym/envs/g1/g1_29dof_config.py` before starting a cloud run.
+
+```bash
+python legged_gym/legged_gym/scripts/train.py \
+  --task g1 \
+  --num_envs 4096 \
+  --headless \
+  --experiment_name g1_formal \
+  --run_name g1_policy_v1 \
+  --max_iterations 100000 \
+  --rl_device cuda:0
 ```
-export LD_LIBRARY_PATH=path_to_miniconda3/envs/homierl/lib:$LD_LIBRARY_PATH
+
+#### ELF3 with SwanLab
+
+ELF3 defaults to SwanLab cloud logging with project `HomieRL-ELF3`. Authenticate once before the first cloud run:
+
+```bash
+swanlab login
 ```
+
+Start formal training:
+
+```bash
+python legged_gym/legged_gym/scripts/train.py \
+  --task elf3 \
+  --num_envs 4096 \
+  --headless \
+  --experiment_name elf3_formal \
+  --run_name elf3_height_lock_v1 \
+  --max_iterations 100000 \
+  --rl_device cuda:0
+```
+
+The current argument parser binds the simulator to `--rl_device`; it does not provide independent RL and simulation device selection. If 4096 environments exceed available GPU memory, reduce `--num_envs` to 2048 or 1024.
+
+Supported training overrides include:
+
+| Option | Meaning |
+|---|---|
+| `--task` | Registered task: `g1` or `elf3` |
+| `--num_envs` | Number of parallel simulation environments |
+| `--headless` | Disable the Isaac Gym viewer |
+| `--experiment_name` | Local log-directory group |
+| `--run_name` | Run name appended to local and cloud metadata |
+| `--max_iterations` | Maximum learning iterations |
+| `--seed` | Random seed |
+| `--rl_device` | Device used by both the policy runner and simulator |
+
+`--resume`, `--load_run`, and `--checkpoint` are parsed, but the current loader still uses the hard-coded `./example_model.pt` path. See [Play](#play) before using resume-related options.
+
+#### Smoke test
+
+A one-iteration smoke test still creates local logs/checkpoints and uses the task's configured cloud logger. To keep the test local, temporarily set `Elf3RoughCfgPPO.runner.logger = "tensorboard"` in `elf3_config.py`, then run:
+
+```bash
+python legged_gym/legged_gym/scripts/train.py \
+  --task elf3 \
+  --num_envs 64 \
+  --headless \
+  --experiment_name elf3_smoke \
+  --run_name smoke \
+  --max_iterations 1 \
+  --rl_device cuda:0
+```
+
+### Logging and Checkpoints
+
+Local run files are written to:
+
+```text
+legged_gym/logs/<experiment_name>/<MonDD_HH-MM-SS>_<run_name>/
+```
+
+G1 defaults to W&B; ELF3 defaults to SwanLab cloud mode; both can be changed to `tensorboard` in their runner configuration. Cloud logger selection is a configuration value, not a CLI option.
+
+Checkpoints are named `model_<iteration>.pt`. The G1 and ELF3 configurations save periodically every 200 iterations and once again when training exits. Typical logged groups include `Episode/*`, `Loss/*`, `Policy/*`, `Perf/*`, `Train/mean_reward`, and `Train/mean_episode_length`.
+
+To inspect local event files:
+
+```bash
+tensorboard --logdir legged_gym/logs
+```
+
+### ELF3 Task Distribution and Upper-body Control
+
+The ELF3 policy controls 12 leg joints and observes all 28 movable joints. The remaining 16 upper-body joints receive position targets generated by the environment.
+
+The default command distribution is:
+
+- height tracking: `50%` of time steps;
+- velocity tracking: `1/3` of time steps;
+- standing: `1/6` of time steps;
+- within height-tracking tasks, `[0.30, 0.50] m` and `[0.50, 1.01] m` are sampled with equal probability;
+- x/y/yaw velocity components are each limited to `[-0.5, 0.5]`.
+
+At full upper-body curriculum:
+
+- `waist_y_joint` uses the configured absolute target range `[-0.50, 0.50] rad`;
+- `waist_z_joint` is locked to `0 rad` during reset, action assembly, delayed control, and final position targeting;
+- upper-body joints not listed in `upper_body_joint_position_ranges` or `upper_body_locked_joint_positions` retain their URDF target limits.
+
+ELF3 logs the time-step fractions spent in each task plus `Episode/height_mae`, `Episode/low_height_mae`, and `Episode/high_height_mae`.
+
 ### Play
-Once you train a policy, you can first set the [resume_path](https://github.com/OpenRobotLab/HomieRL/blob/main/legged_gym/legged_gym/utils/task_registry.py#L6) to the path of your checkpoint, and run the command below:
+
+The current play path has several runtime constraints:
+
+- `task_registry.py` loads `./example_model.pt` when resume is enabled;
+- the path is relative to the current working directory, so copy a task-compatible training checkpoint to `./example_model.pt` in the `HomieRL` root and run from that directory;
+- `--load_run` and `--checkpoint` do not currently change that path;
+- x/y/yaw/height targets are values in the final `play(...)` call, not CLI options; the current script uses `x=0`, `y=0`, `yaw=0`, and `height=0.24`;
+- `EXPORT_POLICY = True`, so a successful play run also writes a JIT policy to `legged_gym/logs/<experiment_name>/exported/policies/policy.pt`.
+
+Run with a viewer:
+
+```bash
+python legged_gym/legged_gym/scripts/play.py --task g1 --num_envs 1 --resume --rl_device cuda:0
+python legged_gym/legged_gym/scripts/play.py --task elf3 --num_envs 1 --resume --rl_device cuda:0
 ```
-python legged_gym/legged_gym/scripts/play.py --num_envs 32 --task g1 --resume
+
+Use `--headless` for rollout/export without a viewer. Headless play does not record video or print an evaluation summary.
+
+### Export Policy to ONNX
+
+`export_onnx.py` converts an exported JIT policy—not a raw training `model_<iteration>.pt` checkpoint—to ONNX. Run play first to create `policy.pt`, then execute:
+
+```bash
+python legged_gym/legged_gym/scripts/export_onnx.py \
+  --task elf3 \
+  --pt-path legged_gym/logs/elf3_formal/exported/policies/policy.pt \
+  --export-path legged_gym/logs/elf3_formal/exported/policies/policy.onnx
 ```
-Then you can view the performance of your trained policy.
-### Export Policy
-We provide a script for you to export you `.pt` checkpoint to `.onnx`, which can be used by our [deployment code](). You can set the [pt_path]() and [export_path]() to what you need, and run
+
+Use `--task g1` and the matching G1 JIT policy when exporting a G1 model.
+
+### Troubleshooting
+
+If Isaac Gym cannot find `libpython3.8.so.1.0`, ensure the active Conda environment's library directory is on `LD_LIBRARY_PATH`:
+
+```bash
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 ```
-python legged_gym/legged_gym/scripts/export_onnx.py
+
+If `gymtorch` reports that Ninja is unavailable, ensure the active environment's binary directory is on `PATH`:
+
+```bash
+export PATH="$CONDA_PREFIX/bin:$PATH"
+```
+
+Before starting a large run, check available GPU memory:
+
+```bash
+nvidia-smi
 ```
 
 ## 🔗 Citation
 
-If you find our work helpful, please cite:
+If you find this work helpful, please cite:
 
 ```bibtex
 @article{ben2025homie,
@@ -111,15 +265,12 @@ If you find our work helpful, please cite:
 }
 ```
 
-</details>
-
 ## 📄 License
 
-All code of HOMIE is under the <a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License </a><a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc-sa/4.0/80x15.png" /></a>. It is strictly forbidden to use it for commercial purposes before asking our team.
+The repository's original work is licensed under the [Creative Commons Attribution-NonCommercial 4.0 International License](LICENSE). Bundled third-party components retain their respective license notices. Commercial use requires permission from the project authors.
 
 ## 👏 Acknowledgements
 
-
-- [RSL_RL](https://github.com/leggedrobotics/rsl_rl): We use `rsl_rl` library to train the control policies for legged robots.
-- [Legged_gym](https://github.com/leggedrobotics/rsl_rl): We use `legged_gym` library to train the control policies for legged robots.
-- [HIMLoco](https://github.com/OpenRobotLab/HIMLoco): We use `HIMLoco` library as our codebase.
+- [RSL_RL](https://github.com/leggedrobotics/rsl_rl): PPO implementation used by this project.
+- [Legged Gym](https://github.com/leggedrobotics/legged_gym): Isaac Gym environments and locomotion framework.
+- [HIMLoco](https://github.com/OpenRobotLab/HIMLoco): base code and learning framework.

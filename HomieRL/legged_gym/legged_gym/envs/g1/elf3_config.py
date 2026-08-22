@@ -103,15 +103,24 @@ class Elf3RoughCfg( LeggedRobotCfg ):
     class commands( LeggedRobotCfg.commands ):
         curriculum = False # NOTE set True later
         max_curriculum = 1.4
-        num_commands = 5 # lin_vel_x, lin_vel_y, ang_vel_yaw, heading, height, orientation
+        num_commands = 5 # lin_vel_x, lin_vel_y, ang_vel_yaw, heading, height
         resampling_time = 4. # time before command are changed[s]
         heading_command = False # if true: compute ang vel command from heading error
         heading_to_ang_vel = False
         height_target = 1.01
+        use_task_distribution = True
+        height_tracking_probability = 0.5
+        velocity_tracking_probability = 1.0 / 3.0
+        standing_probability = 1.0 / 6.0
+        height_sampling_bands = [
+            [0.30, 0.50, 0.5],
+            [0.50, 1.01, 0.5],
+        ]
+        max_abs_velocity_command = 0.5
         class ranges( LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.8, 1.2] # min max [m/s]
+            lin_vel_x = [-0.5, 0.5] # min max [m/s]
             lin_vel_y = [-0.5, 0.5]   # min max [m/s]
-            ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
+            ang_vel_yaw = [-0.5, 0.5]    # min max [rad/s]
             heading = [-3.14, 3.14]
             height = [-0.71, 0.0]
 
@@ -151,7 +160,13 @@ class Elf3RoughCfg( LeggedRobotCfg ):
 
         
     class domain_rand(LeggedRobotCfg.domain_rand):
-        
+        upper_body_joint_position_ranges = {
+            "waist_y_joint": [-0.50, 0.50],
+        }
+        upper_body_locked_joint_positions = {
+            "waist_z_joint": 0.0,
+        }
+
         use_random = True
         
         randomize_joint_injection = use_random
@@ -207,7 +222,7 @@ class Elf3RoughCfg( LeggedRobotCfg ):
             ang_vel_xy = -0.025
             orientation = -1.5
             action_rate = -0.01
-            tracking_base_height = 2.
+            tracking_base_height = 4.
             deviation_hip_joint = -0.2
             deviation_ankle_joint = -0.5
             deviation_knee_joint = -0.75
@@ -238,7 +253,7 @@ class Elf3RoughCfg( LeggedRobotCfg ):
         soft_dof_pos_limit = 0.975
         soft_dof_vel_limit = 0.80
         soft_torque_limit = 0.95
-        base_height_target = 1.035
+        base_height_target = 1.01
         max_contact_force = 400.
         least_feet_distance = 0.2
         least_feet_distance_lateral = 0.2
@@ -247,7 +262,7 @@ class Elf3RoughCfg( LeggedRobotCfg ):
         least_knee_distance_lateral = 0.2
         clearance_height_target = 0.181  # 0.14 + 0.041
         
-    class env( LeggedRobotCfg.rewards ):
+    class env( LeggedRobotCfg.env ):
         num_envs = 4096
         num_actions = 12
         num_dofs = 28
@@ -265,7 +280,7 @@ class Elf3RoughCfg( LeggedRobotCfg ):
     class terrain(LeggedRobotCfg.terrain):
         mesh_type = 'plane'
 
-    class noise( LeggedRobotCfg.terrain ):
+    class noise( LeggedRobotCfg.noise ):
         add_noise = True
         noise_level = 1.0
         class noise_scales( LeggedRobotCfg.noise.noise_scales ):

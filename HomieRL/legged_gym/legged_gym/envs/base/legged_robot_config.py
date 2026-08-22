@@ -73,10 +73,16 @@ class LeggedRobotCfg(BaseConfig):
     class commands:
         curriculum = True
         max_curriculum = 3.0
-        num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
+        num_commands = 5 # lin_vel_x, lin_vel_y, ang_vel_yaw, heading, height
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: sample heading command, if false: sample ang_vel_yaw
         heading_to_ang_vel = False # if true: compute ang vel command from heading error
+        use_task_distribution = False
+        height_tracking_probability = 1.0 / 3.0
+        velocity_tracking_probability = 1.0 / 2.0
+        standing_probability = 1.0 / 6.0
+        height_sampling_bands = [] # [min height, max height, probability]
+        max_abs_velocity_command = None
         class ranges:
             lin_vel_x = [-1.0, 1.0] # min max [m/s]
             lin_vel_y = [-1.0, 1.0]   # min max [m/s]
@@ -132,7 +138,9 @@ class LeggedRobotCfg(BaseConfig):
         thickness = 0.01
 
     class domain_rand:
-        
+        upper_body_joint_position_ranges = {}
+        upper_body_locked_joint_positions = {}
+
         randomize_joint_injection = False
         joint_injection_range = [-0.1, 0.1]
         
@@ -194,6 +202,9 @@ class LeggedRobotCfg(BaseConfig):
         soft_dof_vel_limit = 1.
         soft_torque_limit = 1.
         base_height_target = 1.
+        height_tracking_exp_gain = 4.0
+        upright_height_threshold = 0.735
+        feet_clearance_height_threshold = 0.71
         max_contact_force = 100. # forces above this value are penalized
         clearance_height_target = 0.09
         least_feet_distance = 0.0
