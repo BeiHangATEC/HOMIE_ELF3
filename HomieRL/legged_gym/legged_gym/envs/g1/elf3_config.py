@@ -116,9 +116,9 @@ class Elf3RoughCfg( LeggedRobotCfg ):
             [0.30, 0.50, 0.5],
             [0.50, 1.01, 0.5],
         ]
-        max_abs_velocity_command = 0.5
+        max_abs_velocity_command = 1.0
         class ranges( LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.5, 0.5] # min max [m/s]
+            lin_vel_x = [-1.0, 1.0] # min max [m/s]
             lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.5, 0.5]    # min max [rad/s]
             heading = [-3.14, 3.14]
