@@ -44,6 +44,13 @@ class LeggedRobotCfg(BaseConfig):
         env_spacing = 3.  # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
         episode_length_s = 20 # episode length in seconds
+        action_curriculum_metric = "tracking_x_vel"
+        action_curriculum_step = 0.05
+        action_curriculum_tracking_threshold = 0.8
+        action_curriculum_window_s = 20.0
+        action_curriculum_survival_threshold = 0.9
+        action_curriculum_height_error_threshold = 0.08
+        action_curriculum_ready_windows = 5
 
     class terrain:
         mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
@@ -75,6 +82,15 @@ class LeggedRobotCfg(BaseConfig):
         max_curriculum = 3.0
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 10. # time before command are changed[s]
+        use_random = True
+        training_mode = "mixed"
+        height_target = 1.0
+        height_min = 0.3
+        height_max = 1.0
+        height_endpoint_probability = 0.25
+        height_slew_rate = 0.20
+        walk_command_probability = 0.5
+        squat_command_probability = 0.0
         heading_command = True # if true: sample heading command, if false: sample ang_vel_yaw
         heading_to_ang_vel = False # if true: compute ang vel command from heading error
         class ranges:
@@ -167,6 +183,7 @@ class LeggedRobotCfg(BaseConfig):
         push_robots = False
         push_interval_s = 5
         max_push_vel_xy = 1.
+        upper_height_amplification = 1.0
 
         delay = False
 

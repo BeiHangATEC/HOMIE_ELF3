@@ -147,11 +147,27 @@ class TaskRegistry():
         runner = HIMOnPolicyRunner(env, train_cfg_dict, log_dir, device=args.rl_device)
         #save resume path before creating a new log_dir
         resume = args.resume
+        pretrained_path = getattr(args, "pretrained_path", None)
+        if resume and pretrained_path:
+            raise ValueError("--resume and --pretrained_path cannot be used together")
         if resume:
-            # load previously trained model
-            resume_path = "./example_model.pt"
+            resume_root = os.path.join(
+                LEGGED_GYM_ROOT_DIR, "logs", train_cfg.runner.experiment_name
+            )
+            resume_path = get_load_path(
+                resume_root,
+                train_cfg.runner.load_run,
+                train_cfg.runner.checkpoint,
+            )
+            train_cfg.runner.resume_path = resume_path
             print(f"Loading model from: {resume_path}")
             runner.load(resume_path)
+        elif pretrained_path:
+            pretrained_path = os.path.abspath(os.path.expanduser(pretrained_path))
+            if not os.path.isfile(pretrained_path):
+                raise ValueError(f"Pretrained checkpoint does not exist: {pretrained_path}")
+            print(f"Loading pretrained network from: {pretrained_path}")
+            runner.load_pretrained(pretrained_path)
         return runner, train_cfg
 
 # make global task registry

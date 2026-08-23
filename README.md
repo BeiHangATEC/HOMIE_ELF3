@@ -120,40 +120,97 @@ python legged_gym/legged_gym/scripts/train.py --task elf3 --num_envs 4096 --head
 
 ELF3 uses SwanLab by default and also keeps local logs under `legged_gym/logs/elf3/`. The default run is `100000` iterations, collects `50` steps per environment per iteration, and saves a checkpoint every `200` iterations. Add `--max_iterations N` to override the run length.
 
+### ELF3 两阶段训练
+
+新增任务 `elf3_height` 和 `elf3_walk` 共用同一套 26 自由度模型、444 维 Actor 观测与 12 维腿部动作，原有 `elf3` 混合任务保持不变。
+
+两个阶段默认使用本地 TensorBoard 日志，不要求安装或登录 SwanLab。
+
+第一阶段只训练高度与稳定性。速度命令固定为零，高度命令从 `1.0 m` 开始，每 6 秒在 `0.3-1.0 m` 内重采样目标，并以 `0.20 m/s` 平滑变化。上肢扰动根据 20 秒统计窗内的存活率和高度误差逐步增加；当扰动比例达到 1.0 且连续 5 个窗口达标时，日志中的 `stage1_ready` 变为 1。
+
+```bash
+cd HomieRL
+python legged_gym/legged_gym/scripts/train.py \
+  --task elf3_height \
+  --headless
+```
+
+第二阶段按 episode 固定任务分组：50% 的环境保持零速度，每 6 秒在 `0.3-1.0 m` 内重采样下蹲目标，并以 `0.20 m/s` 平滑变化；其余 50% 的环境固定高度为 `1.0 m`，其中一半采样全向运动命令、一半原地站立。因此全部环境的期望比例为 50% 下蹲、25% 行走和 25% 站立。人工选择第一阶段 checkpoint 后，通过 `--pretrained_path` 只迁移网络权重；优化器、迭代数和上肢课程状态都会重新开始。
+
+```bash
+cd HomieRL
+python legged_gym/legged_gym/scripts/train.py \
+  --task elf3_walk \
+  --pretrained_path legged_gym/logs/elf3_height/<run>/model_<iteration>.pt \
+  --headless
+```
+
+在已有第二阶段策略上继续微调外八下蹲时，使用独立任务 `elf3_walk_toeout`，不会修改原 `elf3_walk`。该任务保持 50% 下蹲、25% 行走、25% 站立的命令分布和 `444 -> 12` 策略接口。零速度下蹲高度从 `0.735 m` 降到 `0.50 m` 时，左右足端偏航目标由 `0°` 线性增加到 `+15°/-15°`；`0.50 m` 以下保持完整角度。双足中心横向距离仅在超出 `0.20-0.35 m` 时惩罚，不采用越宽奖励越高的形式。
+
+```bash
+cd HomieRL
+python legged_gym/legged_gym/scripts/train.py \
+  --task elf3_walk_toeout \
+  --pretrained_path legged_gym/logs/elf3_walk/Aug22_11-31-42_squat50_from_height12000/model_10200.pt \
+  --run_name toeout15_from_walk10200 \
+  --max_iterations 5000 \
+  --headless
+```
+
+该微调默认使用 `learning_rate=2e-4`、`entropy_coef=0.005`，每 200 次迭代保存一次 checkpoint。`--pretrained_path` 只初始化网络权重，优化器、迭代计数和课程状态从头开始。
+
+同一阶段中断后继续训练时使用 `--resume`。`--load_run -1 --checkpoint -1` 表示选择该任务实验目录下最新的 run 和 checkpoint，也可以显式指定二者。
+
+```bash
+python legged_gym/legged_gym/scripts/train.py \
+  --task elf3_height \
+  --resume \
+  --load_run -1 \
+  --checkpoint -1 \
+  --headless
+```
+
 ### Play in Isaac Gym
 
-`play.py` accepts four motion values in its final `play(...)` call and writes them before every simulation step. They are source-configured targets, not W/A/S/D or arrow-key controls.
+`play.py` 启动 Isaac Gym viewer 后会同时打开一个 Tkinter 控制窗。四个滑条会在每个推理周期更新全部仿真环境的速度与高度命令，数值会限制在 ELF3 的训练范围内。
 
-| Value | Meaning | ELF3 training range |
+| 参数 | 含义 | ELF3 训练范围 |
 |---|---|---|
-| `x_vel` | Body-frame forward (`+`) or backward (`-`) velocity | `-0.8` to `1.2 m/s` |
-| `y_vel` | Body-frame left (`+`) or right (`-`) velocity | `-0.5` to `0.5 m/s` |
-| `yaw_vel` | Left (`+`) or right (`-`) yaw rate | `-0.8` to `0.8 rad/s` |
-| `height` | Base-height command | `0.30` to `1.01 m` |
+| `x_vel` | 机身坐标系前进（`+`）或后退（`-`）速度 | `-0.8` 至 `1.2 m/s` |
+| `y_vel` | 机身坐标系向左（`+`）或向右（`-`）速度 | `-0.5` 至 `0.5 m/s` |
+| `yaw_vel` | 向左（`+`）或向右（`-`）转向角速度 | `-0.8` 至 `0.8 rad/s` |
+| `height` | 机身高度命令 | `0.30` 至 `1.01 m` |
 
-For example, use the following final call in `legged_gym/legged_gym/scripts/play.py` to command ELF3 to walk forward at `0.5 m/s` while standing at `1.01 m`:
+文件末尾的 `play(...)` 参数作为控制窗初始值；当前默认速度为零，高度为 `0.8 m`。例如，以下调用会让控制窗从前进 `0.5 m/s`、高度 `1.01 m` 开始：
 
 ```
 play(args, x_vel=0.5, y_vel=0.0, yaw_vel=0.0, height=1.01)
 ```
 
-Use zero velocity with `height=1.01` to stand, a negative `x_vel` to walk backward, a non-zero `y_vel` to move laterally, a non-zero `yaw_vel` to turn, or `height=0.30` to command the lowest trained squat. The current repository default is zero velocity with `height=0.24`, which is a low squat for G1 and is outside ELF3's trained height range; change it before playing ELF3. The shared environment still runs its four-second command-resampling callback, so a resampled command can appear in one returned observation before the next play-loop iteration restores these values.
+`Zero speeds` 会把三个速度立即归零并保留当前高度，`Restore defaults` 会恢复 `play(...)` 传入的全部初始值。关闭控制窗会结束播放。播放模式会禁用环境的周期命令重采样，因此滑条命令不会再被随机命令短暂覆盖。
 
-The current checkpoint loader expects `./example_model.pt` relative to the `HomieRL` working directory. Select a checkpoint and run:
+四个滑条面向同时训练速度和高度的 `elf3` 混合策略。`elf3_height` checkpoint 的速度训练命令始终为零。第二阶段 `elf3_walk` checkpoint 包含互斥的行走和下蹲分布：行走时高度固定为 `1.0 m`，下蹲时速度固定为零，不要使用“低姿态 + 非零速度”的训练分布外组合。使用 `--headless` 时不会创建控制窗，推理过程持续使用 `play(...)` 的固定初始值。
+
+播放 checkpoint 时同样使用 `--resume`、`--load_run` 和 `--checkpoint` 选择模型，不再需要复制为 `./example_model.pt`：
 
 ```
 cd path_to_OpenHomie/HomieRL
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-export ELF3_CHECKPOINT=/absolute/path/to/model_ITERATION.pt
-cp "$ELF3_CHECKPOINT" ./example_model.pt
-python legged_gym/legged_gym/scripts/play.py --task elf3 --num_envs 32 --resume --experiment_name elf3 --rl_device cuda:0
+python legged_gym/legged_gym/scripts/play.py \
+  --task elf3 \
+  --num_envs 32 \
+  --resume \
+  --experiment_name elf3 \
+  --load_run <run> \
+  --checkpoint <iteration> \
+  --rl_device cuda:0
 ```
 
 The policy controls 12 leg joints in left-then-right `hip_y`, `hip_x`, `hip_z`, knee, `ankle_y`, and `ankle_x` order. Each policy output is scaled by `0.25` around the default joint angle before the shared controller computes the leg command. During Isaac Gym play, the environment continues to generate random upper-body position targets. `Esc` exits the viewer and `V` toggles viewer synchronization. With `EXPORT_POLICY=True`, play also exports a TorchScript policy to `legged_gym/logs/elf3/exported/policies/policy.pt`.
 
 ### Sim2Sim in MuJoCo
 
-The current MuJoCo Sim2Sim path is G1-only. It hard-codes `MujocoDeploy/g1.yaml`, requires the G1 MJCF model, and assumes the first 12 model joints are the policy-controlled legs. Its default command is `[0.0, 0.0, 0.0]` with `height_cmd: 0.34`, so G1 performs a low stationary squat rather than walking. There is no keyboard locomotion control; change `cmd_init` and `height_cmd` in `g1.yaml` before launch.
+G1 仍使用 `MujocoDeploy/g1.yaml`、G1 MJCF 和 TorchScript 策略。其默认命令是 `[0.0, 0.0, 0.0]`，`height_cmd` 为 `0.34`；需要在 `g1.yaml` 中修改固定命令。
 
 After placing the exported G1 TorchScript file at the `policy_path` configured in `g1.yaml`, run:
 
@@ -164,7 +221,56 @@ cd path_to_OpenHomie/MujocoDeploy
 python mujoco_deploy_g1.py
 ```
 
-ELF3 Sim2Sim is **not yet runnable in this repository**, so there is currently no valid ELF3 Sim2Sim command. Do not point `g1.yaml` at an ELF3 policy: ELF3 needs a MuJoCo model and YAML configuration with `444` observations and a compatible `0.30-1.01 m` height command, plus joint indexing or model ordering that preserves its explicit 12 policy DOFs and 14 upper-body DOFs. Name-based indexing is the preferred robust implementation. The current Sim2Sim loader consumes the TorchScript `policy.pt` exported by play, not an ONNX file.
+ELF3 使用独立的 26 自由度 MuJoCo 模型、ONNX 策略和随策略生成的 JSON 契约，不复用 `MujocoDeploy/g1.yaml`。导出器可以直接读取训练 checkpoint 或 `play.py` 导出的 TorchScript，校验 `444 -> 12` 接口、比较 128 组 PyTorch/ONNX 输出，并在同目录生成 `policy.contract.json`。以下命令直接导出第二阶段 `model_10200.pt`：
+
+```bash
+cd path_to_OpenHomie/HomieRL
+python legged_gym/legged_gym/scripts/export_onnx.py \
+  --task elf3_walk \
+  --pt-path legged_gym/logs/elf3_walk/Aug22_11-31-42_squat50_from_height12000/model_10200.pt \
+  --export-path legged_gym/logs/elf3_walk/Aug22_11-31-42_squat50_from_height12000/exported/policies/policy.onnx
+```
+
+交互运行时省略 `--headless`，控制窗提供 `Walk` 和 `Squat` 两种模式。`Walk` 固定高度为 `1.0 m` 并开放三个速度滑条；`Squat` 将速度归零并开放 `0.30-1.00 m` 高度滑条。高度命令按训练配置的 `0.20 m/s` 平滑变化；从下蹲切回行走时，机器人先以零速度升到 `1.0 m`，再执行速度命令。
+
+```bash
+python legged_gym/legged_gym/scripts/sim2sim_elf3.py \
+  --policy legged_gym/logs/elf3_walk/Aug22_11-31-42_squat50_from_height12000/exported/policies/policy.onnx \
+  --contract legged_gym/logs/elf3_walk/Aug22_11-31-42_squat50_from_height12000/exported/policies/policy.contract.json \
+  --duration 30
+```
+
+运行无界面行走门禁：
+
+```bash
+python legged_gym/legged_gym/scripts/sim2sim_elf3.py \
+  --policy legged_gym/logs/elf3_walk/Aug22_11-31-42_squat50_from_height12000/exported/policies/policy.onnx \
+  --contract legged_gym/logs/elf3_walk/Aug22_11-31-42_squat50_from_height12000/exported/policies/policy.contract.json \
+  --mode walk \
+  --vx 0.3 --vy 0.0 --yaw 0.0 --height 1.0 \
+  --duration 30 --headless --gate \
+  --metrics legged_gym/logs/elf3_walk/sim2sim_forward.json
+```
+
+无界面下蹲门禁使用 `--mode squat --vx 0 --vy 0 --yaw 0 --height 0.30`。`elf3_height` 只接受零速度和 `0.30-1.00 m` 高度，`elf3` 接受训练配置中的速度范围和 `0.30-1.01 m` 高度；越界命令、非法模式组合、策略或模型哈希不匹配都会直接失败。复位根高度由契约独立设置为 `1.05552264 m`，不能用策略高度命令替代。
+
+导出外八策略时将任务改为 `elf3_walk_toeout`。生成的契约会额外记录外八高度区间、左右最大偏航角和双足距离范围。Sim2Sim 不会向 `hip_z` 注入偏置，只执行导出的策略；指标 JSON 会输出左右足端实际/目标偏航、稳定段偏航 RMSE 和双足中心横向距离。外八契约在 `Squat` 门禁中还要求每只脚偏航 RMSE 不超过 `5°`、足距全程保持在 `0.20-0.35 m`，并在 `0.50 m` 及以下达到左 `+15±3°`、右 `-15±3°`。
+
+```bash
+python legged_gym/legged_gym/scripts/export_onnx.py \
+  --task elf3_walk_toeout \
+  --pt-path legged_gym/logs/elf3_walk_toeout/<run>/model_<iteration>.pt \
+  --export-path legged_gym/logs/elf3_walk_toeout/<run>/exported/policies/policy.onnx
+
+python legged_gym/legged_gym/scripts/sim2sim_elf3.py \
+  --policy legged_gym/logs/elf3_walk_toeout/<run>/exported/policies/policy.onnx \
+  --contract legged_gym/logs/elf3_walk_toeout/<run>/exported/policies/policy.contract.json \
+  --mode squat --vx 0 --vy 0 --yaw 0 --height 0.50 \
+  --duration 30 --headless --gate \
+  --metrics legged_gym/logs/elf3_walk_toeout/sim2sim_squat_050.json
+```
+
+仓库中的 `elf3_fixed_waist.xml` 是根据当前 URDF 和已校正足底几何生成的派生开发模型，不是厂家验证的最终 MJCF。它通过门禁只能说明开发阶段 Sim2Sim 可用；取得厂家 26 自由度 MJCF 后，使用 `--model-path <vendor.xml> --model-classification vendor` 重新导出契约并执行相同门禁。
 
 
 

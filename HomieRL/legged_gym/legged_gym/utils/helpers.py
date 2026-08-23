@@ -102,27 +102,43 @@ def parse_sim_params(args, cfg):
     return sim_params
 
 def get_load_path(root, load_run=-1, checkpoint=-1):
-    try:
-        runs = os.listdir(root)
-        #TODO sort by date to handle change of month
-        runs.sort()
-        if 'exported' in runs: runs.remove('exported')
-        last_run = os.path.join(root, runs[-1])
-    except:
+    if not os.path.isdir(root):
+        raise ValueError("Log directory does not exist: " + root)
+    runs = sorted(
+        run for run in os.listdir(root)
+        if run != "exported" and os.path.isdir(os.path.join(root, run))
+    )
+    if not runs:
         raise ValueError("No runs in this directory: " + root)
-    if load_run==-1:
-        load_run = last_run
-    else:
-        load_run = os.path.join(root, load_run)
 
-    if checkpoint==-1:
-        models = [file for file in os.listdir(load_run) if 'model' in file]
-        models.sort(key=lambda m: '{0:0>15}'.format(m))
+    if str(load_run) == "-1":
+        load_run = os.path.join(root, runs[-1])
+    elif os.path.isabs(str(load_run)):
+        load_run = str(load_run)
+    else:
+        load_run = os.path.join(root, str(load_run))
+    if not os.path.isdir(load_run):
+        raise ValueError("Run directory does not exist: " + load_run)
+
+    if str(checkpoint) == "-1":
+        models = [
+            filename for filename in os.listdir(load_run)
+            if (
+                filename.startswith("model_")
+                and filename.endswith(".pt")
+                and filename[len("model_"):-len(".pt")].isdigit()
+            )
+        ]
+        if not models:
+            raise ValueError("No checkpoints in this directory: " + load_run)
+        models.sort(key=lambda name: int(name[len("model_"):-len(".pt")]))
         model = models[-1]
     else:
         model = "model_{}.pt".format(checkpoint) 
 
     load_path = os.path.join(load_run, model)
+    if not os.path.isfile(load_path):
+        raise ValueError("Checkpoint does not exist: " + load_path)
     return load_path
 
 def update_cfg_from_args(env_cfg, cfg_train, args):
@@ -160,6 +176,7 @@ def get_args():
         {"name": "--run_name", "type": str,  "help": "Name of the run. Overrides config file if provided."},
         {"name": "--load_run", "type": str,  "help": "Name of the run to load when resume=True. If -1: will load the last run. Overrides config file if provided."},
         {"name": "--checkpoint", "type": int,  "help": "Saved model checkpoint number. If -1: will load the last checkpoint. Overrides config file if provided."},
+        {"name": "--pretrained_path", "type": str, "help": "Load network weights only for staged training."},
         
         {"name": "--headless", "action": "store_true", "default": False, "help": "Force display off at all times"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},

@@ -93,9 +93,23 @@ python legged_gym/legged_gym/scripts/play.py --num_envs 32 --task g1 --resume
 ```
 Then you can view the performance of your trained policy.
 ### Export Policy
-We provide a script for you to export you `.pt` checkpoint to `.onnx`, which can be used by our [deployment code](). You can set the [pt_path]() and [export_path]() to what you need, and run
+导出器接受 `play.py` 生成的 TorchScript 策略，并根据 `--task` 检查输入维度。ELF3 任务还会生成供 MuJoCo Sim2Sim 使用的同名 `*.contract.json`：
 ```
-python legged_gym/legged_gym/scripts/export_onnx.py
+python legged_gym/legged_gym/scripts/export_onnx.py \
+  --task elf3_walk \
+  --pt-path legged_gym/logs/elf3_walk/exported/policies/policy.pt \
+  --export-path legged_gym/logs/elf3_walk/exported/policies/policy.onnx
+```
+
+ELF3 外八下蹲微调使用独立任务 `elf3_walk_toeout`。零速度下蹲高度从 `0.735 m` 降至 `0.50 m` 时，左右脚目标由 `0°` 线性变化至 `+15°/-15°`，更低高度保持完整角度；行走和站立仍保持双脚朝前。
+
+```bash
+python legged_gym/legged_gym/scripts/train.py \
+  --task elf3_walk_toeout \
+  --pretrained_path legged_gym/logs/elf3_walk/Aug22_11-31-42_squat50_from_height12000/model_10200.pt \
+  --run_name toeout15_from_walk10200 \
+  --max_iterations 5000 \
+  --headless
 ```
 
 ## 🔗 Citation

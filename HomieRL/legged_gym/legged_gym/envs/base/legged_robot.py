@@ -47,6 +47,17 @@ from legged_gym.envs.base.base_task import BaseTask
 from legged_gym.utils.math import quat_apply_yaw, wrap_to_pi, torch_rand_sqrt_float
 from legged_gym.utils.helpers import class_to_dict
 from .legged_robot_config import LeggedRobotCfg
+from .staged_training import (
+    bounded_lateral_distance_reward,
+    evaluate_height_curriculum,
+    sample_height_targets,
+    sample_squat_modes,
+    sample_stage2_commands,
+    squat_toe_out_ratio,
+    squat_toe_out_targets,
+    slew_height_commands,
+    upper_height_amplification,
+)
 import threading
 import time
 
@@ -120,10 +131,24 @@ class LeggedRobot(BaseTask):
             uu = torch.rand(self.num_envs, self.num_upper_dof, device=self.device)
             self.random_upper_ratio = -1.0 / (20 * (1-self.random_upper_ratio*0.99))*torch.log(1 - uu + uu * np.exp(-20 * (1-self.random_upper_ratio*0.99)))
             self.random_joint_ratio = self.random_upper_ratio * torch.rand(self.num_envs, self.num_upper_dof).to(self.device)
+            if self.commands.shape[1] > 4:
+                height_amplification = upper_height_amplification(
+                    self.commands[:, 4],
+                    getattr(self.cfg.commands, "height_min", 0.3),
+                    getattr(self.cfg.commands, "height_max", 1.0),
+                    getattr(self.cfg.domain_rand, "upper_height_amplification", 1.0),
+                ).unsqueeze(1)
+                self.random_joint_ratio = torch.clamp(
+                    self.random_joint_ratio * height_amplification, max=1.0
+                )
             rand_pos = torch.rand(self.num_envs, self.num_upper_dof, device=self.device) - 0.5
             upper_action_min = self.action_min[:, self.upper_body_dof_indices]
             upper_action_max = self.action_max[:, self.upper_body_dof_indices]
             self.random_upper_actions = ((upper_action_min * (rand_pos >= 0)) + (upper_action_max * (rand_pos < 0)))* self.random_joint_ratio
+            self.random_upper_actions = torch.maximum(
+                upper_action_min,
+                torch.minimum(self.random_upper_actions, upper_action_max),
+            )
             self.delta_upper_actions = (self.random_upper_actions - self.current_upper_actions) / (self.cfg.domain_rand.upper_interval)
         self.current_upper_actions += self.delta_upper_actions
         full_actions = torch.zeros_like(self.actions)
@@ -199,7 +224,10 @@ class LeggedRobot(BaseTask):
         self._post_physics_step_callback()
 
         # compute observations, rewards, resets, ...
+        self._accumulate_height_error()
         self.check_termination()
+        self._record_height_curriculum_episodes()
+        self._advance_height_curriculum_window()
         self.compute_reward()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         termination_privileged_obs = self.compute_termination_observations(env_ids)
@@ -220,7 +248,11 @@ class LeggedRobot(BaseTask):
     def check_termination(self):
         """ Check if environments need to be reset
         """
-        self.reset_buf = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 10., dim=1)
+        self.contact_termination_buf = torch.any(
+            torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 10.,
+            dim=1,
+        )
+        self.reset_buf = self.contact_termination_buf.clone()
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
         self.gravity_termination_buf = torch.any(torch.norm(self.projected_gravity[:, 0:2], dim=-1, keepdim=True) > 0.8, dim=1)
         self.reset_buf |= self.time_out_buf
@@ -242,7 +274,11 @@ class LeggedRobot(BaseTask):
         if self.cfg.commands.curriculum and (self.common_step_counter % self.max_episode_length==0):
             self.update_command_curriculum(env_ids)
         # update action curriculum for specific dofs
-        if self.cfg.env.action_curriculum and (self.common_step_counter % self.max_episode_length==0):
+        if (
+            self.cfg.env.action_curriculum
+            and getattr(self.cfg.env, "action_curriculum_metric", "tracking_x_vel") != "survival_height"
+            and (self.common_step_counter % self.max_episode_length == 0)
+        ):
             self.update_action_curriculum(env_ids)
             
         self.refresh_actor_rigid_shape_props(env_ids)
@@ -251,8 +287,15 @@ class LeggedRobot(BaseTask):
         self._reset_dofs(env_ids)
         self._reset_root_states(env_ids)
 
-        # resample commands
-        self._resample_commands(env_ids)
+        # Keep externally supplied commands unchanged during interactive play.
+        if getattr(self.cfg.commands, "use_random", True):
+            training_mode = getattr(self.cfg.commands, "training_mode", "mixed")
+            if training_mode == "height":
+                self._reset_height_commands(env_ids)
+            elif training_mode == "walk":
+                self._reset_walk_commands(env_ids)
+            else:
+                self._resample_commands(env_ids)
 
         # reset buffers
         self.last_actions[env_ids] = 0.
@@ -263,6 +306,7 @@ class LeggedRobot(BaseTask):
         self.random_upper_actions[env_ids] = 0. 
         self.current_upper_actions[env_ids] = 0.
         self.delta_upper_actions[env_ids] = 0.
+        self.episode_height_error_sum[env_ids] = 0.
         reset_roll, reset_pitch, reset_yaw = euler_from_quaternion(self.base_quat[env_ids])
         self.roll[env_ids] = reset_roll
         self.pitch[env_ids] = reset_pitch
@@ -287,6 +331,17 @@ class LeggedRobot(BaseTask):
             # self.extras["episode"]["height_curriculum_ratio"] = self.height_curriculum_ratio
         if self.cfg.env.action_curriculum:
             self.extras["episode"]["action_curriculum_ratio"] = self.action_curriculum_ratio
+            if getattr(self.cfg.env, "action_curriculum_metric", "tracking_x_vel") == "survival_height":
+                self.extras["episode"]["curriculum_survival_rate"] = self.curriculum_survival_rate
+                self.extras["episode"]["curriculum_height_mae"] = self.curriculum_height_mae
+                self.extras["episode"]["stage1_qualified_windows"] = self.stage1_qualified_windows
+                self.extras["episode"]["stage1_ready"] = self.stage1_ready
+        if getattr(self.cfg.commands, "training_mode", "mixed") == "walk":
+            moving = torch.any(torch.abs(self.commands[:, :3]) > 1.0e-6, dim=1)
+            self.extras["episode"]["stage2_squat_ratio"] = torch.mean(
+                self.walk_squat_mask.float()
+            )
+            self.extras["episode"]["stage2_moving_ratio"] = torch.mean(moving.float())
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
@@ -515,9 +570,16 @@ class LeggedRobot(BaseTask):
         """ Callback called before computing terminations, rewards, and observations
             Default behaviour: Compute ang vel command based on target and heading, compute measured terrain heights and randomly push robots
         """
-        # 
-        env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0).nonzero(as_tuple=False).flatten()
+        resampling_steps = max(1, int(round(self.cfg.commands.resampling_time / self.dt)))
+        env_ids = (self.episode_length_buf % resampling_steps == 0).nonzero(as_tuple=False).flatten()
         self._resample_commands(env_ids)
+        if getattr(self.cfg.commands, "training_mode", "mixed") in ("height", "walk"):
+            self.commands[:, 4] = slew_height_commands(
+                self.commands[:, 4],
+                self.height_command_targets,
+                self.cfg.commands.height_slew_rate,
+                self.dt,
+            )
                 
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
@@ -528,6 +590,25 @@ class LeggedRobot(BaseTask):
         Args:
             env_ids (List[int]): Environments ids for which new commands are needed
         """
+        if not getattr(self.cfg.commands, "use_random", True) or len(env_ids) == 0:
+            return
+
+        training_mode = getattr(self.cfg.commands, "training_mode", "mixed")
+        if training_mode == "height":
+            self.commands[env_ids, :4] = 0.0
+            self.height_command_targets[env_ids] = sample_height_targets(
+                len(env_ids),
+                self.cfg.commands.height_min,
+                self.cfg.commands.height_max,
+                self.cfg.commands.height_endpoint_probability,
+                self.device,
+            )
+            return
+
+        if training_mode == "walk":
+            self._resample_walk_commands(env_ids)
+            return
+
         set_x = torch.rand(len(env_ids), 1).to(self.device)
         is_height = set_x < 1/3
         is_vel = set_x > 1/2
@@ -540,6 +621,116 @@ class LeggedRobot(BaseTask):
         else:
             self.commands[env_ids, 2] = (torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device) * is_vel).squeeze(1)
             self.commands[env_ids, 4] = (torch_rand_float(self.command_ranges["height"][0], self.command_ranges["height"][1], (len(env_ids), 1), device=self.device) * is_height).squeeze(1) + height_target # height
+
+    def _reset_height_commands(self, env_ids):
+        """每个第一阶段 episode 都从站立高度开始。"""
+        initial_height = self.cfg.commands.height_target
+        self.commands[env_ids] = 0.0
+        self.commands[env_ids, 4] = initial_height
+        self.height_command_targets[env_ids] = initial_height
+
+    def _reset_walk_commands(self, env_ids):
+        """每个第二阶段 episode 固定下蹲组与行走/站立组。"""
+        initial_height = self.cfg.commands.height_target
+        self.commands[env_ids] = 0.0
+        self.commands[env_ids, 4] = initial_height
+        self.height_command_targets[env_ids] = initial_height
+        self.walk_squat_mask[env_ids] = sample_squat_modes(
+            len(env_ids),
+            self.cfg.commands.squat_command_probability,
+            self.device,
+        )
+        self._resample_walk_commands(env_ids)
+
+    def _resample_walk_commands(self, env_ids):
+        velocity_commands, height_targets = sample_stage2_commands(
+            self.walk_squat_mask[env_ids],
+            self.command_ranges["lin_vel_x"],
+            self.command_ranges["lin_vel_y"],
+            self.command_ranges["ang_vel_yaw"],
+            self.cfg.commands.walk_command_probability,
+            self.cfg.commands.height_min,
+            self.cfg.commands.height_max,
+            self.cfg.commands.height_endpoint_probability,
+            self.cfg.commands.height_target,
+        )
+        self.commands[env_ids, :3] = velocity_commands
+        self.commands[env_ids, 3] = 0.0
+        self.height_command_targets[env_ids] = height_targets
+        standing_ids = env_ids[~self.walk_squat_mask[env_ids]]
+        self.commands[standing_ids, 4] = self.cfg.commands.height_target
+
+    def _height_error(self):
+        base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
+        base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
+        base_height = torch.max(base_height_l, base_height_r)
+        return torch.abs(
+            base_height - self.commands[:, 4] + self.cfg.asset.ankle_sole_distance
+        )
+
+    def _accumulate_height_error(self):
+        if getattr(self.cfg.commands, "training_mode", "mixed") != "height":
+            return
+        self.episode_height_error_sum += self._height_error()
+
+    def _record_height_curriculum_episodes(self):
+        if getattr(self.cfg.env, "action_curriculum_metric", "tracking_x_vel") != "survival_height":
+            return
+        env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
+        if len(env_ids) == 0:
+            return
+
+        episode_steps = torch.clamp(self.episode_length_buf[env_ids], min=1)
+        episode_mae = self.episode_height_error_sum[env_ids] / episode_steps
+        self.curriculum_completed_episodes += len(env_ids)
+        normal_timeouts = (
+            self.time_out_buf[env_ids]
+            & ~self.contact_termination_buf[env_ids]
+            & ~self.gravity_termination_buf[env_ids]
+        )
+        self.curriculum_successful_episodes += int(normal_timeouts.sum().item())
+        self.curriculum_height_error_sum += float(episode_mae.sum().item())
+
+    def _advance_height_curriculum_window(self):
+        if getattr(self.cfg.env, "action_curriculum_metric", "tracking_x_vel") != "survival_height":
+            return
+
+        self.curriculum_window_step += 1
+        if self.curriculum_window_step < self.curriculum_window_steps:
+            return
+
+        completed = self.curriculum_completed_episodes
+        if completed == 0:
+            self.curriculum_window_step = 0
+            return
+        mean_height_error = self.curriculum_height_error_sum / completed
+        result = evaluate_height_curriculum(
+            self.action_curriculum_ratio,
+            self.curriculum_successful_episodes,
+            completed,
+            mean_height_error,
+            self.stage1_qualified_windows,
+            self.cfg.env.action_curriculum_step,
+            self.cfg.env.action_curriculum_survival_threshold,
+            self.cfg.env.action_curriculum_height_error_threshold,
+            self.cfg.env.action_curriculum_ready_windows,
+        )
+        was_ready = self.stage1_ready
+        self.action_curriculum_ratio = result.ratio
+        self.stage1_qualified_windows = result.qualified_windows
+        self.stage1_ready = max(was_ready, result.ready)
+        self.curriculum_survival_rate = result.survival_rate
+        self.curriculum_height_mae = result.mean_height_error
+        if self.stage1_ready and not was_ready:
+            print(
+                "[elf3_height] stage1_ready=1: upper-body curriculum reached 1.0 "
+                f"for {self.stage1_qualified_windows} qualified windows"
+            )
+
+        self.curriculum_window_step = 0
+        self.curriculum_completed_episodes = 0
+        self.curriculum_successful_episodes = 0
+        self.curriculum_height_error_sum = 0.0
         
     def _compute_torques(self, actions):
         """ Compute torques from actions.
@@ -649,9 +840,46 @@ class LeggedRobot(BaseTask):
         Args:
             env_ids (List[int]): ids of environments being reset
         """
-        if (torch.mean(self.episode_sums["tracking_x_vel"][env_ids]) / self.max_episode_length > 0.8 * self.reward_scales["tracking_x_vel"]):
-            self.action_curriculum_ratio += 0.05
+        threshold = getattr(self.cfg.env, "action_curriculum_tracking_threshold", 0.8)
+        step = getattr(self.cfg.env, "action_curriculum_step", 0.05)
+        if (torch.mean(self.episode_sums["tracking_x_vel"][env_ids]) / self.max_episode_length > threshold * self.reward_scales["tracking_x_vel"]):
+            self.action_curriculum_ratio += step
             self.action_curriculum_ratio = min(self.action_curriculum_ratio, 1.0)
+
+    def get_curriculum_state(self):
+        return {
+            "action_curriculum_ratio": self.action_curriculum_ratio,
+            "curriculum_window_step": self.curriculum_window_step,
+            "curriculum_completed_episodes": self.curriculum_completed_episodes,
+            "curriculum_successful_episodes": self.curriculum_successful_episodes,
+            "curriculum_height_error_sum": self.curriculum_height_error_sum,
+            "curriculum_survival_rate": self.curriculum_survival_rate,
+            "curriculum_height_mae": self.curriculum_height_mae,
+            "stage1_qualified_windows": self.stage1_qualified_windows,
+            "stage1_ready": self.stage1_ready,
+        }
+
+    def set_curriculum_state(self, state):
+        defaults = self._default_curriculum_state()
+        defaults.update(state)
+        for key, value in defaults.items():
+            setattr(self, key, value)
+
+    def reset_curriculum_state(self):
+        self.set_curriculum_state(self._default_curriculum_state())
+
+    def _default_curriculum_state(self):
+        return {
+            "action_curriculum_ratio": self.cfg.domain_rand.init_upper_ratio,
+            "curriculum_window_step": 0,
+            "curriculum_completed_episodes": 0,
+            "curriculum_successful_episodes": 0,
+            "curriculum_height_error_sum": 0.0,
+            "curriculum_survival_rate": 0.0,
+            "curriculum_height_mae": 0.0,
+            "stage1_qualified_windows": 0,
+            "stage1_ready": 0,
+        }
 
     def _get_noise_scale_vec(self, cfg):
         """ Sets a vector used to scale the noise added to the observations.
@@ -718,6 +946,18 @@ class LeggedRobot(BaseTask):
         self.last_dof_vel = torch.zeros_like(self.dof_vel)
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
         self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float, device=self.device, requires_grad=False) # x vel, y vel, yaw vel, heading
+        initial_height = getattr(self.cfg.commands, "height_target", self.cfg.rewards.base_height_target)
+        self.height_command_targets = torch.full(
+            (self.num_envs,), initial_height, dtype=torch.float, device=self.device
+        )
+        self.walk_squat_mask = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        if self.commands.shape[1] > 4:
+            self.commands[:, 4] = initial_height
+        self.episode_height_error_sum = torch.zeros(
+            self.num_envs, dtype=torch.float, device=self.device, requires_grad=False
+        )
         self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel], device=self.device, requires_grad=False,) # TODO change this
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.feet_max_height = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
@@ -749,7 +989,7 @@ class LeggedRobot(BaseTask):
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
         self.action_max = (self.hard_dof_pos_limits[:, 1].unsqueeze(0) - self.default_dof_pos) / self.cfg.control.action_scale
         self.action_min = (self.hard_dof_pos_limits[:, 0].unsqueeze(0) - self.default_dof_pos) / self.cfg.control.action_scale
-        self.action_curriculum_ratio = self.cfg.domain_rand.init_upper_ratio
+        self.reset_curriculum_state()
         self.target_heights = torch.ones((self.num_envs), device=self.device) * self.cfg.rewards.base_height_target
         print(f"Action min: {self.action_min}")
         print(f"Action max: {self.action_max}")
@@ -1065,6 +1305,11 @@ class LeggedRobot(BaseTask):
         self.cfg.terrain.curriculum = False
         self.max_episode_length_s = self.cfg.env.episode_length_s
         self.max_episode_length = np.ceil(self.max_episode_length_s / self.dt)
+        training_mode = getattr(self.cfg.commands, "training_mode", "mixed")
+        if training_mode not in ("mixed", "height", "walk"):
+            raise ValueError(f"Unknown command training_mode: {training_mode}")
+        curriculum_window_s = getattr(self.cfg.env, "action_curriculum_window_s", 20.0)
+        self.curriculum_window_steps = max(1, int(round(curriculum_window_s / self.dt)))
         self.cfg.domain_rand.push_interval = np.ceil(self.cfg.domain_rand.push_interval_s / self.dt)
         self.cfg.domain_rand.upper_interval = np.ceil(self.cfg.domain_rand.upper_interval_s / self.dt)
 
@@ -1170,11 +1415,7 @@ class LeggedRobot(BaseTask):
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
     
     def _reward_tracking_base_height(self):
-        base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
-        base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
-        base_height = torch.max(base_height_l, base_height_r)
-        height_error = torch.abs(base_height - self.commands[:, 4] + self.cfg.asset.ankle_sole_distance)
-        return torch.exp(-height_error * 4)
+        return torch.exp(-self._height_error() * 4)
     
     def _reward_deviation_hip_joint(self):
         return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.hip_joint_indices], dim=-1) *  (self.commands[:, 4] >= 0.735)
@@ -1222,7 +1463,57 @@ class LeggedRobot(BaseTask):
         for i in range(len(self.feet_indices)):
             footpos_in_body_frame[:, i, :] = quat_rotate_inverse(self.base_quat, cur_footpos_translated[:, i, :])
         foot_leteral_dis = torch.abs(footpos_in_body_frame[:, 0, 1] - footpos_in_body_frame[:, 1, 1])
-        return torch.clamp(foot_leteral_dis - self.cfg.rewards.least_feet_distance_lateral, max=0) + torch.clamp(-foot_leteral_dis + self.cfg.rewards.most_feet_distance_lateral, max=0) * (self.commands[:, 4] >= 0.735)
+        legacy_reward = (
+            torch.clamp(
+                foot_leteral_dis - self.cfg.rewards.least_feet_distance_lateral,
+                max=0,
+            )
+            + torch.clamp(
+                -foot_leteral_dis + self.cfg.rewards.most_feet_distance_lateral,
+                max=0,
+            )
+            * (self.commands[:, 4] >= 0.735)
+        )
+        if not getattr(
+            self.cfg.rewards, "enforce_squat_feet_distance_bounds", False
+        ):
+            return legacy_reward
+        squat_reward = bounded_lateral_distance_reward(
+            foot_leteral_dis,
+            self.cfg.rewards.least_feet_distance_lateral,
+            self.cfg.rewards.most_feet_distance_lateral,
+        )
+        return torch.where(self.walk_squat_mask, squat_reward, legacy_reward)
+
+    def _feet_yaw_in_body_frame(self):
+        feet_count = self.feet_quat.shape[1]
+        foot_forward = self.forward_vec.unsqueeze(1).expand(-1, feet_count, -1)
+        foot_forward_world = quat_apply(
+            self.feet_quat.reshape(-1, 4), foot_forward.reshape(-1, 3)
+        )
+        base_quat = self.base_quat.unsqueeze(1).expand(-1, feet_count, -1)
+        foot_forward_body = quat_rotate_inverse(
+            base_quat.reshape(-1, 4), foot_forward_world
+        ).view(self.num_envs, feet_count, 3)
+        return torch.atan2(foot_forward_body[:, :, 1], foot_forward_body[:, :, 0])
+
+    def _reward_squat_toe_out(self):
+        heights = self.commands[:, 4]
+        start_height = self.cfg.commands.toe_out_start_height
+        full_angle_height = self.cfg.commands.toe_out_full_angle_height
+        ratio = squat_toe_out_ratio(heights, start_height, full_angle_height)
+        targets = squat_toe_out_targets(
+            heights,
+            start_height,
+            full_angle_height,
+            self.cfg.commands.toe_out_max_angle_deg,
+        )
+        errors = wrap_to_pi(self._feet_yaw_in_body_frame() - targets)
+        tracking = torch.exp(
+            -torch.sum(torch.square(errors), dim=1)
+            / self.cfg.rewards.toe_out_tracking_sigma
+        )
+        return self.walk_squat_mask.float() * ratio * tracking
     
     def _reward_knee_distance_lateral(self):
         cur_knee_pos_translated = self.rigid_body_states[:, self.knee_indices, :3].clone() - self.root_states[:, 0:3].unsqueeze(1)

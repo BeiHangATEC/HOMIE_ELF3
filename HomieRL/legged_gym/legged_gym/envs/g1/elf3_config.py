@@ -253,6 +253,13 @@ class Elf3RoughCfg( LeggedRobotCfg ):
         num_observations = num_actor_history * num_one_step_observations
         num_privileged_obs = num_critic_history * num_one_step_privileged_obs
         action_curriculum = True
+        action_curriculum_metric = "tracking_x_vel"
+        action_curriculum_step = 0.05
+        action_curriculum_tracking_threshold = 0.8
+        action_curriculum_window_s = 20.0
+        action_curriculum_survival_threshold = 0.9
+        action_curriculum_height_error_threshold = 0.08
+        action_curriculum_ready_windows = 5
         env_spacing = 3.  # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
         episode_length_s = 20
@@ -292,3 +299,105 @@ class Elf3RoughCfgPPO( LeggedRobotCfgPPO ):
         # logger = "wandb"
         wandb_project = ""
         wandb_user = "" # enter your own wandb user name here
+
+
+class Elf3HeightCfg(Elf3RoughCfg):
+    class commands(Elf3RoughCfg.commands):
+        training_mode = "height"
+        resampling_time = 6.0
+        height_target = 1.0
+        height_min = 0.3
+        height_max = 1.0
+        height_endpoint_probability = 0.25
+        height_slew_rate = 0.20
+
+    class domain_rand(Elf3RoughCfg.domain_rand):
+        init_upper_ratio = 0.0
+        upper_height_amplification = 1.5
+
+    class rewards(Elf3RoughCfg.rewards):
+        base_height_target = 1.0
+
+        class scales(Elf3RoughCfg.rewards.scales):
+            tracking_x_vel = 1.0
+            tracking_y_vel = 1.0
+            tracking_ang_vel = 1.0
+            tracking_base_height = 5.0
+            orientation = -2.0
+            feet_air_time = 0.0
+            feet_clearance = 0.0
+
+    class env(Elf3RoughCfg.env):
+        action_curriculum_metric = "survival_height"
+        action_curriculum_step = 0.05
+        action_curriculum_window_s = 20.0
+        action_curriculum_survival_threshold = 0.9
+        action_curriculum_height_error_threshold = 0.08
+        action_curriculum_ready_windows = 5
+
+
+class Elf3WalkCfg(Elf3RoughCfg):
+    class commands(Elf3RoughCfg.commands):
+        training_mode = "walk"
+        resampling_time = 6.0
+        height_target = 1.0
+        height_min = 0.3
+        height_max = 1.0
+        height_endpoint_probability = 0.25
+        height_slew_rate = 0.20
+        walk_command_probability = 0.5
+        squat_command_probability = 0.5
+
+        class ranges(Elf3RoughCfg.commands.ranges):
+            lin_vel_x = [-0.5, 0.5]
+            lin_vel_y = [-0.3, 0.3]
+            ang_vel_yaw = [-0.5, 0.5]
+            height = [0.0, 0.0]
+
+    class domain_rand(Elf3RoughCfg.domain_rand):
+        init_upper_ratio = 0.0
+
+    class rewards(Elf3RoughCfg.rewards):
+        base_height_target = 1.0
+
+
+class Elf3WalkToeOutCfg(Elf3WalkCfg):
+    class commands(Elf3WalkCfg.commands):
+        toe_out_start_height = 0.735
+        toe_out_full_angle_height = 0.50
+        toe_out_max_angle_deg = 15.0
+
+    class rewards(Elf3WalkCfg.rewards):
+        toe_out_tracking_sigma = 0.05
+        enforce_squat_feet_distance_bounds = True
+
+        class scales(Elf3WalkCfg.rewards.scales):
+            squat_toe_out = 2.0
+
+
+class Elf3HeightCfgPPO(Elf3RoughCfgPPO):
+    class runner(Elf3RoughCfgPPO.runner):
+        save_interval = 100
+        max_iterations = 20000
+        experiment_name = "elf3_height"
+        logger = "tensorboard"
+
+
+class Elf3WalkCfgPPO(Elf3RoughCfgPPO):
+    class runner(Elf3RoughCfgPPO.runner):
+        save_interval = 200
+        max_iterations = 100000
+        experiment_name = "elf3_walk"
+        logger = "tensorboard"
+
+
+class Elf3WalkToeOutCfgPPO(Elf3WalkCfgPPO):
+    class algorithm(Elf3WalkCfgPPO.algorithm):
+        learning_rate = 2.0e-4
+        entropy_coef = 0.005
+
+    class runner(Elf3WalkCfgPPO.runner):
+        save_interval = 200
+        max_iterations = 5000
+        experiment_name = "elf3_walk_toeout"
+        logger = "tensorboard"

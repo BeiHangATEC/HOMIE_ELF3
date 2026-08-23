@@ -1,0 +1,24 @@
+{
+  "classification": "derived development MJCF; not a vendor-validated final model",
+  "source_urdf": "../urdf/elf3.urdf",
+  "source_urdf_sha256": "2254ba9cb34dea18b91b7206c6fdee6ea9be4ebc052221c83f554b41c4549ad1",
+  "reference_mjcf": "HomieRL_sim2sim_reference_20260816/legged_gym/resources/robots/elf3_dof31/mjcf/r1_derived/elf3_homie_urdf_sole.xml",
+  "reference_mjcf_sha256": "0298518db4a72907e7769fb27741978b0b591a48f069f4b2d4a7b0d1e96b9192",
+  "derived_mjcf": "elf3_fixed_waist.xml",
+  "derived_mjcf_sha256": "f5d480609bf1784aa16ccb1bd3dd12341b107be7816eff261953f70be76b13d7",
+  "ankle_collision_mesh_sha256": "e273bae5d726d52b64939cc9c5c547ab093bbf6f75c2af1bc718c62feb208f8f",
+  "changes": [
+    "Removed waist_y_joint, waist_x_joint, waist_z_joint, head_z_joint and head_y_joint hinges, motors and joint-position sensors.",
+    "Preserved the fixed child bodies and their inertial properties.",
+    "Mapped the hand geometry to l_hand.STL and r_hand.STL from the current ELF3 asset.",
+    "Preserved the sole-calibrated foot collision boxes at pos 0.03 0 -0.0205 and half-size 0.12 0.04 0.0205."
+  ],
+  "validated_contract": {
+    "nq": 33,
+    "nv": 32,
+    "nu": 26,
+    "movable_hinge_joints": 26,
+    "total_body_mass_kg": 43.222480280000006,
+    "physics_timestep_s": 0.005
+  }
+}

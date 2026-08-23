@@ -30,6 +30,8 @@
 
 import time
 import os
+import warnings
+import copy
 from collections import deque
 import statistics
 
@@ -79,6 +81,10 @@ class HIMOnPolicyRunner:
                                                         **self.policy_cfg).to(self.device)
         alg_class = eval(self.cfg["algorithm_class_name"]) # HIMPPO
         self.alg: HIMPPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
+        self.initial_optimizer_state_dict = copy.deepcopy(self.alg.optimizer.state_dict())
+        self.initial_estimator_optimizer_state_dict = copy.deepcopy(
+            self.alg.actor_critic.estimator.optimizer.state_dict()
+        )
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
 
@@ -264,22 +270,52 @@ class HIMOnPolicyRunner:
         print(log_string)
 
     def save(self, path, infos=None):
-        torch.save({
+        checkpoint = {
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'estimator_optimizer_state_dict': self.alg.actor_critic.estimator.optimizer.state_dict(),
             'iter': self.current_learning_iteration + 1,
             'infos': infos,
-            }, path)
+        }
+        if hasattr(self.env, "get_curriculum_state"):
+            checkpoint['env_curriculum_state'] = self.env.get_curriculum_state()
+        torch.save(checkpoint, path)
 
-    def load(self, path, load_optimizer=True):
+    def load(self, path, load_optimizer=True, load_env_state=True, restore_iteration=True):
         loaded_dict = torch.load(path, map_location=self.device)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
             self.alg.actor_critic.estimator.optimizer.load_state_dict(loaded_dict['estimator_optimizer_state_dict'])
-        self.current_learning_iteration = loaded_dict['iter']
-        return loaded_dict['infos']
+        self.current_learning_iteration = loaded_dict.get('iter', 0) if restore_iteration else 0
+        if load_env_state and hasattr(self.env, "set_curriculum_state"):
+            if 'env_curriculum_state' in loaded_dict:
+                self.env.set_curriculum_state(loaded_dict['env_curriculum_state'])
+            else:
+                warnings.warn(
+                    "旧 checkpoint 缺少环境课程状态，已使用当前任务的配置默认值。",
+                    RuntimeWarning,
+                )
+        return loaded_dict.get('infos')
+
+    def load_pretrained(self, path):
+        infos = self.load(
+            path,
+            load_optimizer=False,
+            load_env_state=False,
+            restore_iteration=False,
+        )
+        if hasattr(self.env, "reset_curriculum_state"):
+            self.env.reset_curriculum_state()
+        if hasattr(self, "initial_optimizer_state_dict"):
+            self.alg.optimizer.load_state_dict(self.initial_optimizer_state_dict)
+        if hasattr(self, "initial_estimator_optimizer_state_dict"):
+            self.alg.actor_critic.estimator.optimizer.load_state_dict(
+                self.initial_estimator_optimizer_state_dict
+            )
+        self.tot_timesteps = 0
+        self.tot_time = 0
+        return infos
 
     def get_inference_policy(self, device=None):
         self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)

@@ -30,12 +30,18 @@
 
 from legged_gym import LEGGED_GYM_ROOT_DIR
 import os
+import threading
 
 import onnxruntime as ort
 
 import isaacgym
 from legged_gym.envs import *
 from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Logger
+from legged_gym.utils.command_slider import (
+    SliderCommand,
+    SliderControlPanel,
+    apply_command_snapshot,
+)
 
 import numpy as np
 import torch
@@ -57,7 +63,12 @@ def load_onnx_policy():
     return run_inference
 
 def play(args, x_vel=0.0, y_vel=0.0, yaw_vel=0.0, height=0.74):
-
+    command = SliderCommand(
+        x_vel=x_vel,
+        y_vel=y_vel,
+        yaw_vel=yaw_vel,
+        height=height,
+    )
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
     env_cfg.terrain.num_rows = 10
@@ -77,12 +88,8 @@ def play(args, x_vel=0.0, y_vel=0.0, yaw_vel=0.0, height=0.74):
     env_cfg.env.upper_teleop = False
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
-    env.commands[:, 0] = x_vel
-    env.commands[:, 1] = y_vel
-    env.commands[:, 2] = yaw_vel
-    env.commands[:, 4] = height
+    apply_command_snapshot(env, command.snapshot())
     env.action_curriculum_ratio = 1.0
-    obs = env.get_observations()
     # load policy
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
@@ -98,22 +105,41 @@ def play(args, x_vel=0.0, y_vel=0.0, yaw_vel=0.0, height=0.74):
     camera_position = np.array(env_cfg.viewer.pos, dtype=np.float64)
     camera_vel = np.array([1., 1., 0.])
     camera_direction = np.array(env_cfg.viewer.lookat) - np.array(env_cfg.viewer.pos)
-    env.reset_idx(torch.arange(env.num_envs).to("cuda:0"))
-    for _ in range(10*int(env.max_episode_length)):
-        env.action_curriculum_ratio = 1.0
-        actions = policy(obs.detach())
-        env.commands[:, 0] = x_vel
-        env.commands[:, 1] = y_vel
-        env.commands[:, 2] = yaw_vel
-        env.commands[:, 4] = height
-        obs, _, _, _, _, _, _ = env.step(actions.detach())
-        if MOVE_CAMERA:
-            camera_position += camera_vel * env.dt
-            env.set_camera(camera_position, camera_position + camera_direction)
+    env.reset_idx(torch.arange(env.num_envs, device=env.device))
+    apply_command_snapshot(env, command.snapshot())
+    env.compute_observations()
+    obs = env.get_observations()
+
+    stop_event = threading.Event()
+    control_panel = None
+    if not args.headless:
+        control_panel = SliderControlPanel(command)
+        control_panel.start(stop_event)
+
+    try:
+        for _ in range(10*int(env.max_episode_length)):
+            if control_panel is not None:
+                control_panel.raise_if_failed()
+            if stop_event.is_set():
+                break
+            env.action_curriculum_ratio = 1.0
+            apply_command_snapshot(env, command.snapshot())
+            actions = policy(obs.detach())
+            obs, _, _, _, _, _, _ = env.step(actions.detach())
+            if MOVE_CAMERA:
+                camera_position += camera_vel * env.dt
+                env.set_camera(camera_position, camera_position + camera_direction)
+    finally:
+        stop_event.set()
+        if control_panel is not None:
+            control_panel.join()
+
+    if control_panel is not None:
+        control_panel.raise_if_failed()
 
 if __name__ == '__main__':
     EXPORT_POLICY = True
     RECORD_FRAMES = False
     MOVE_CAMERA = False
     args = get_args()
-    play(args, x_vel=0., y_vel=0., yaw_vel=0., height=0.24)
+    play(args, x_vel=0., y_vel=0., yaw_vel=0., height=0.8)
