@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "robot": "ELF3",
+  "task": "elf3",
+  "annotation_date": "2026-08-23",
+  "source_run": "HomieRL/legged_gym/logs/elf3_formal/Aug22_13-44-59_elf3_task_mix_45_45_10_v1",
+  "run_name": "elf3_task_mix_45_45_10_v1",
+  "task_distribution": {
+    "height_tracking": 0.45,
+    "velocity_tracking": 0.45,
+    "standing": 0.1
+  },
+  "command_ranges": {
+    "lin_vel_x_mps": [
+      -1.0,
+      1.0
+    ],
+    "lin_vel_y_mps": [
+      -0.5,
+      0.5
+    ],
+    "ang_vel_yaw_radps": [
+      -0.5,
+      0.5
+    ],
+    "height_m": [
+      0.3,
+      1.01
+    ]
+  },
+  "iteration": 13200,
+  "checkpoint_path": "HomieRL/pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt",
+  "size_bytes": 9504953,
+  "sha256": "45d026c3e68754c19e191f996ce3cd4a07966b257b5dc924f3491faa65ca37a5",
+  "training_run_started_at_utc": "2026-08-22T13:44:59Z",
+  "checkpoint_saved_at_utc": "2026-08-23T02:44:27.888651Z",
+  "promoted_at_utc": "2026-08-23T02:54:34.821841Z",
+  "training_code_commit": "9671b4cf9d2fc3f21969f187e3b6ac60da3f05b9",
+  "github_published_at_utc": null
+}

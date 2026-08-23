@@ -190,7 +190,7 @@ The default command distribution is:
 - velocity tracking: `45%` of time steps;
 - standing: `10%` of time steps;
 - within height-tracking tasks, `[0.30, 0.50] m` and `[0.50, 1.01] m` are sampled with equal probability;
-- x/y/yaw velocity components are each limited to `[-0.5, 0.5]`.
+- x velocity is limited to `[-1.0, 1.0] m/s`; y velocity and yaw rate remain limited to `[-0.5, 0.5] m/s` and `[-0.5, 0.5] rad/s`, respectively.
 
 At full upper-body curriculum:
 
@@ -202,12 +202,12 @@ ELF3 logs the time-step fractions spent in each task plus `Episode/height_mae`, 
 
 ### Play
 
-The repository includes the latest ELF3 formal-training checkpoint at `pretrained/elf3/model_13400.pt` (iteration 13400, SHA-256 `09c59f6221c4545cdb45ddfe05003464bd67b89e092761867f53d43f8095d987`).
+The latest promoted checkpoint for the `45% / 45% / 10%` task-mix run is `pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt`. It was saved at `2026-08-23T02:44:27.888651Z`, promoted on `2026-08-23`, contains iteration `13200`, is `9,504,953` bytes, and has SHA-256 `45d026c3e68754c19e191f996ce3cd4a07966b257b5dc924f3491faa65ca37a5`. Its portable provenance record is the adjacent `.json` file. The older height-lock checkpoint remains available at `pretrained/elf3/model_13400.pt`.
 
 The current play path has several runtime constraints:
 
 - `task_registry.py` loads `./example_model.pt` when resume is enabled;
-- the path is relative to the current working directory, so for ELF3 copy `pretrained/elf3/model_13400.pt` to `./example_model.pt` in the `HomieRL` root; use a task-compatible checkpoint for G1;
+- the path is relative to the current working directory, so for ELF3 copy the promoted task-mix checkpoint to `./example_model.pt` in the `HomieRL` root; use a task-compatible checkpoint for G1;
 - `--load_run` and `--checkpoint` do not currently change that path;
 - x/y/yaw/height targets are values in the final `play(...)` call, not CLI options; the current script uses `x=0`, `y=0`, `yaw=0`, and `height=0.24`;
 - `EXPORT_POLICY = True`, so a successful play run also writes a JIT policy to `legged_gym/logs/<experiment_name>/exported/policies/policy.pt`.
@@ -215,7 +215,7 @@ The current play path has several runtime constraints:
 Run the included ELF3 checkpoint with a viewer:
 
 ```bash
-cp pretrained/elf3/model_13400.pt ./example_model.pt
+cp pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt ./example_model.pt
 python legged_gym/legged_gym/scripts/play.py --task elf3 --num_envs 1 --resume --rl_device cuda:0
 ```
 

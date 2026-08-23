@@ -130,13 +130,15 @@ python legged_gym/legged_gym/scripts/train.py \
 
 ELF3 uses SwanLab by default and also keeps local logs under `legged_gym/logs/elf3_formal/`. The default run collects `50` steps per environment per iteration and saves a checkpoint every `200` iterations. Add `--max_iterations N` to override the documented run length.
 
+The latest promoted task-mix checkpoint is `HomieRL/pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt` (iteration `13200`, saved `2026-08-23T02:44:27.888651Z`, promoted `2026-08-23`, SHA-256 `45d026c3e68754c19e191f996ce3cd4a07966b257b5dc924f3491faa65ca37a5`).
+
 ### Play in Isaac Gym
 
 `play.py` accepts four motion values in its final `play(...)` call and writes them before every simulation step. They are source-configured targets, not W/A/S/D or arrow-key controls.
 
 | Value | Meaning | ELF3 training range |
 |---|---|---|
-| `x_vel` | Body-frame forward (`+`) or backward (`-`) velocity | `-0.5` to `0.5 m/s` |
+| `x_vel` | Body-frame forward (`+`) or backward (`-`) velocity | `-1.0` to `1.0 m/s` |
 | `y_vel` | Body-frame left (`+`) or right (`-`) velocity | `-0.5` to `0.5 m/s` |
 | `yaw_vel` | Left (`+`) or right (`-`) yaw rate | `-0.5` to `0.5 rad/s` |
 | `height` | Base-height command | `0.30` to `1.01 m` |
@@ -154,7 +156,7 @@ The current checkpoint loader expects `./example_model.pt` relative to the `Homi
 ```
 cd path_to_OpenHomie/HomieRL
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-export ELF3_CHECKPOINT=/absolute/path/to/model_ITERATION.pt
+export ELF3_CHECKPOINT=pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt
 cp "$ELF3_CHECKPOINT" ./example_model.pt
 python legged_gym/legged_gym/scripts/play.py --task elf3 --num_envs 32 --resume --experiment_name elf3 --rl_device cuda:0
 ```
