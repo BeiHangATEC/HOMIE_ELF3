@@ -29,6 +29,7 @@
   - [Logging and Checkpoints](#logging-and-checkpoints)
   - [ELF3 Task Distribution](#elf3-task-distribution-and-upper-body-control)
   - [Play](#play)
+  - [ELF3 Policy Demo](#elf3-policy-demo)
   - [Export Policy to ONNX](#export-policy-to-onnx)
   - [Troubleshooting](#troubleshooting)
 - [🔗 Citation](#citation)
@@ -189,7 +190,7 @@ The default command distribution is:
 - height tracking: `45%` of time steps;
 - velocity tracking: `45%` of time steps;
 - standing: `10%` of time steps;
-- within height-tracking tasks, `[0.30, 0.50] m` and `[0.50, 1.01] m` are sampled with equal probability;
+- within height-tracking tasks, `[0.40, 0.55] m` and `[0.55, 1.01] m` are sampled with equal probability;
 - x velocity is limited to `[-1.0, 1.0] m/s`; y velocity and yaw rate remain limited to `[-0.5, 0.5] m/s` and `[-0.5, 0.5] rad/s`, respectively.
 
 At full upper-body curriculum:
@@ -202,7 +203,7 @@ ELF3 logs the time-step fractions spent in each task plus `Episode/height_mae`, 
 
 ### Play
 
-The latest promoted checkpoint for the `45% / 45% / 10%` task-mix run is `pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt`. It was saved at `2026-08-23T02:44:27.888651Z`, promoted on `2026-08-23`, contains iteration `13200`, is `9,504,953` bytes, and has SHA-256 `45d026c3e68754c19e191f996ce3cd4a07966b257b5dc924f3491faa65ca37a5`. Its portable provenance record is the adjacent `.json` file. The older height-lock checkpoint remains available at `pretrained/elf3/model_13400.pt`.
+The latest promoted checkpoint for the `0.40-1.01 m`, `45% / 45% / 10%` run is [`pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.pt`](pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.pt). It was saved at `2026-08-23T16:27:03.577292483Z`, contains iteration `11400`, is `9,504,953` bytes, and has SHA-256 `085ce1758c2e65d7f0914ab2fcc6de16ba71eeda433f8eba550418638dcd6579`. Its [portable provenance record](pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.json) records that training began from commit `7251f74` with the exact `0.40-1.01 m` configuration still uncommitted at launch. The prior `0.30-1.01 m` task-mix checkpoint and older height-lock checkpoint remain available at `pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt` and `pretrained/elf3/model_13400.pt`.
 
 The current play path has several runtime constraints:
 
@@ -215,13 +216,39 @@ The current play path has several runtime constraints:
 Run the included ELF3 checkpoint with a viewer:
 
 ```bash
-cp pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt ./example_model.pt
+cp pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.pt ./example_model.pt
 python legged_gym/legged_gym/scripts/play.py --task elf3 --num_envs 1 --resume --rl_device cuda:0
 ```
 
 For G1, place a G1-compatible checkpoint at `./example_model.pt` and replace `--task elf3` with `--task g1`.
 
 Use `--headless` for rollout/export without a viewer. Headless play does not record video or print an evaluation summary.
+
+### ELF3 Policy Demo
+
+The [iteration-11400 policy video](recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.mp4) demonstrates squat to `0.40 m`, rise to `1.01 m`, forward/backward motion, left/right lateral motion, and left/right in-place turns. It is a nominal Isaac Gym Preview 4 simulation on a plane with the upper body fixed and randomization disabled; it is not real-robot validation.
+
+The published recording is H.264/yuv420p at `1280x720`, `25 FPS`, and approximately `50.5 s`. It completed with zero environment resets. Review the [contact sheet](recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z_contact_sheet.png), [recording metadata](recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.recording.json), or [portable artifact manifest](recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.manifest.json).
+
+To record another checkpoint with the same sequence:
+
+```bash
+export PATH="$CONDA_PREFIX/bin:$PATH"
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+export TORCH_EXTENSIONS_DIR=/path/to/persistent/torch_extensions
+
+python legged_gym/legged_gym/scripts/record_elf3_policy.py \
+  --checkpoint /absolute/path/to/model_ITERATION.pt \
+  --output /absolute/path/to/elf3_demo.mp4 \
+  --task elf3 \
+  --sim_device cuda:0 \
+  --pipeline gpu \
+  --physx \
+  --rl_device cuda:0 \
+  --headless
+```
+
+The recorder uses one off-screen Isaac Gym environment, refuses a checkpoint without a valid iteration, aborts on an environment reset, and writes an adjacent JSON provenance file.
 
 ### Export Policy to ONNX
 

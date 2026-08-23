@@ -96,19 +96,19 @@ The `elf3` Isaac Gym task reuses the G1 `LeggedRobot` environment and HIM PPO im
 |---|---|---|
 | Robot asset | `g1_description/g1.urdf` | `elf3_description/urdf/elf3.urdf` |
 | Initial base height | `0.75 m` | `1.01 m` |
-| Height-task range | `0.24-0.74 m` | `0.30-1.01 m` |
-| Base-height config | `0.74 m` | `1.035 m` |
+| Height-task range | `0.24-0.74 m` | `0.40-1.01 m` |
+| Base-height config | `0.74 m` | `1.01 m` |
 | Foot-clearance target | `0.14 m` | `0.181 m` |
 | Total DOFs / policy actions | `27 / 12` | `28 / 12` |
 | Actor / critic observations | `456 / 79` | `468 / 81` |
 | Policy joint selection | First 12 asset DOFs | Explicit 12-leg-DOF name mapping |
 | Default logger | Weights & Biases | SwanLab cloud project `HomieRL-ELF3` |
 
-The reward weights, domain-randomization ranges, terrain and noise settings, and HIM PPO hyperparameters are unchanged. ELF3 sets `commands.height_target=1.01`; the current height reward follows this command, so `1.01 m`, rather than the separate `1.035 m` base-height field, is the normal standing and walking command.
+The reward weights, domain-randomization ranges, terrain and noise settings, and HIM PPO hyperparameters are unchanged. ELF3 sets both `commands.height_target` and the base-height reward target to `1.01 m`, which is the normal standing and walking command.
 
 ### Train
 
-ELF3 samples height tracking and velocity tracking for `45%` of time steps each, with the remaining `10%` used for standing. Within height-tracking tasks, the `[0.30, 0.50] m` and `[0.50, 1.01] m` bands remain equally likely.
+ELF3 samples height tracking and velocity tracking for `45%` of time steps each, with the remaining `10%` used for standing. Within height-tracking tasks, the `[0.40, 0.55] m` and `[0.55, 1.01] m` bands remain equally likely.
 
 Activate the installed HomieRL environment, authenticate SwanLab once, and start the registered `elf3` task from the `HomieRL` directory:
 
@@ -130,7 +130,11 @@ python legged_gym/legged_gym/scripts/train.py \
 
 ELF3 uses SwanLab by default and also keeps local logs under `legged_gym/logs/elf3_formal/`. The default run collects `50` steps per environment per iteration and saves a checkpoint every `200` iterations. Add `--max_iterations N` to override the documented run length.
 
-The latest promoted task-mix checkpoint is `HomieRL/pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt` (iteration `13200`, saved `2026-08-23T02:44:27.888651Z`, promoted `2026-08-23`, SHA-256 `45d026c3e68754c19e191f996ce3cd4a07966b257b5dc924f3491faa65ca37a5`).
+The latest promoted checkpoint for the `0.40-1.01 m` height range is [`elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.pt`](HomieRL/pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.pt) (iteration `11400`, saved `2026-08-23T16:27:03.577292483Z`, `9,504,953` bytes, SHA-256 `085ce1758c2e65d7f0914ab2fcc6de16ba71eeda433f8eba550418638dcd6579`). See its [training provenance](HomieRL/pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.json).
+
+### Latest Isaac Gym Policy Demo
+
+The [iteration-11400 policy video](HomieRL/recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.mp4) demonstrates squat, stand, forward/backward motion, left/right lateral motion, and left/right in-place turns. It is a nominal Isaac Gym Preview 4 simulation on a plane—not real-robot validation—and completed the `50.5 s`, `1280x720`, `25 FPS` rollout with zero environment resets. See the [contact sheet](HomieRL/recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z_contact_sheet.png) and [artifact manifest](HomieRL/recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.manifest.json).
 
 ### Play in Isaac Gym
 
@@ -141,7 +145,7 @@ The latest promoted task-mix checkpoint is `HomieRL/pretrained/elf3/elf3_task_mi
 | `x_vel` | Body-frame forward (`+`) or backward (`-`) velocity | `-1.0` to `1.0 m/s` |
 | `y_vel` | Body-frame left (`+`) or right (`-`) velocity | `-0.5` to `0.5 m/s` |
 | `yaw_vel` | Left (`+`) or right (`-`) yaw rate | `-0.5` to `0.5 rad/s` |
-| `height` | Base-height command | `0.30` to `1.01 m` |
+| `height` | Base-height command | `0.40` to `1.01 m` |
 
 For example, use the following final call in `legged_gym/legged_gym/scripts/play.py` to command ELF3 to walk forward at `0.5 m/s` while standing at `1.01 m`:
 
@@ -149,14 +153,14 @@ For example, use the following final call in `legged_gym/legged_gym/scripts/play
 play(args, x_vel=0.5, y_vel=0.0, yaw_vel=0.0, height=1.01)
 ```
 
-Use zero velocity with `height=1.01` to stand, a negative `x_vel` to walk backward, a non-zero `y_vel` to move laterally, a non-zero `yaw_vel` to turn, or `height=0.30` to command the lowest trained squat. The current repository default is zero velocity with `height=0.24`, which is a low squat for G1 and is outside ELF3's trained height range; change it before playing ELF3. The shared environment still runs its four-second command-resampling callback, so a resampled command can appear in one returned observation before the next play-loop iteration restores these values.
+Use zero velocity with `height=1.01` to stand, a negative `x_vel` to walk backward, a non-zero `y_vel` to move laterally, a non-zero `yaw_vel` to turn, or `height=0.40` to command the lowest trained squat. The current repository default is zero velocity with `height=0.24`, which is a low squat for G1 and is outside ELF3's trained height range; change it before playing ELF3. The shared environment still runs its four-second command-resampling callback, so a resampled command can appear in one returned observation before the next play-loop iteration restores these values.
 
 The current checkpoint loader expects `./example_model.pt` relative to the `HomieRL` working directory. Select a checkpoint and run:
 
 ```
 cd path_to_OpenHomie/HomieRL
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-export ELF3_CHECKPOINT=pretrained/elf3/elf3_task_mix_45_45_10_v1_iter13200_20260823T024427Z.pt
+export ELF3_CHECKPOINT=pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.pt
 cp "$ELF3_CHECKPOINT" ./example_model.pt
 python legged_gym/legged_gym/scripts/play.py --task elf3 --num_envs 32 --resume --experiment_name elf3 --rl_device cuda:0
 ```
@@ -176,7 +180,7 @@ cd path_to_OpenHomie/MujocoDeploy
 python mujoco_deploy_g1.py
 ```
 
-ELF3 Sim2Sim is **not yet runnable in this repository**, so there is currently no valid ELF3 Sim2Sim command. Do not point `g1.yaml` at an ELF3 policy: ELF3 needs a MuJoCo model and YAML configuration with `468` observations and a compatible `0.30-1.01 m` height command, plus joint indexing or model ordering that preserves its explicit 12 policy DOFs and 16 upper-body DOFs. Name-based indexing is the preferred robust implementation. The current Sim2Sim loader consumes the TorchScript `policy.pt` exported by play, not an ONNX file.
+ELF3 Sim2Sim is **not yet runnable in this repository**, so there is currently no valid ELF3 Sim2Sim command. Do not point `g1.yaml` at an ELF3 policy: ELF3 needs a MuJoCo model and YAML configuration with `468` observations and a compatible `0.40-1.01 m` height command, plus joint indexing or model ordering that preserves its explicit 12 policy DOFs and 16 upper-body DOFs. Name-based indexing is the preferred robust implementation. The current Sim2Sim loader consumes the TorchScript `policy.pt` exported by play, not an ONNX file.
 
 
 

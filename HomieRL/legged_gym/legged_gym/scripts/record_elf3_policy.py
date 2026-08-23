@@ -29,7 +29,7 @@ FPS = 25
 WIDTH = 1280
 HEIGHT = 720
 STAND_HEIGHT = 1.01
-SQUAT_HEIGHT = 0.30
+SQUAT_HEIGHT = 0.40
 LATIN_FONT_PATH = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 CJK_FONT_PATH = Path("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf")
 
@@ -44,14 +44,14 @@ TIMELINE = [
     (21.0, "站稳", 0.0, 0.0, 0.0, STAND_HEIGHT, 0.8),
     (25.5, "后退", -0.60, 0.0, 0.0, STAND_HEIGHT, 0.8),
     (27.0, "站稳", 0.0, 0.0, 0.0, STAND_HEIGHT, 0.8),
-    (31.0, "原地左转", 0.0, 0.0, 0.45, STAND_HEIGHT, 0.8),
+    (31.0, "向左侧移", 0.0, 0.40, 0.0, STAND_HEIGHT, 0.8),
     (32.5, "站稳", 0.0, 0.0, 0.0, STAND_HEIGHT, 0.8),
-    (36.5, "原地右转", 0.0, 0.0, -0.45, STAND_HEIGHT, 0.8),
+    (36.5, "向右侧移", 0.0, -0.40, 0.0, STAND_HEIGHT, 0.8),
     (38.0, "站稳", 0.0, 0.0, 0.0, STAND_HEIGHT, 0.8),
-    (42.5, "前进左转弯", 0.55, 0.0, 0.35, STAND_HEIGHT, 0.8),
-    (44.0, "站稳", 0.0, 0.0, 0.0, STAND_HEIGHT, 0.8),
-    (48.5, "前进右转弯", 0.55, 0.0, -0.35, STAND_HEIGHT, 0.8),
-    (51.5, "站立结束", 0.0, 0.0, 0.0, STAND_HEIGHT, 0.8),
+    (42.0, "原地左转", 0.0, 0.0, 0.45, STAND_HEIGHT, 0.8),
+    (43.5, "站稳", 0.0, 0.0, 0.0, STAND_HEIGHT, 0.8),
+    (47.5, "原地右转", 0.0, 0.0, -0.45, STAND_HEIGHT, 0.8),
+    (50.5, "站立结束", 0.0, 0.0, 0.0, STAND_HEIGHT, 0.8),
 ]
 
 

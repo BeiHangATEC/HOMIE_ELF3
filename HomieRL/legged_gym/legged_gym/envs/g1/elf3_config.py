@@ -113,8 +113,8 @@ class Elf3RoughCfg( LeggedRobotCfg ):
         velocity_tracking_probability = 0.45
         standing_probability = 0.10
         height_sampling_bands = [
-            [0.30, 0.50, 0.5],
-            [0.50, 1.01, 0.5],
+            [0.40, 0.55, 0.5],
+            [0.55, 1.01, 0.5],
         ]
         max_abs_velocity_command = 1.0
         class ranges( LeggedRobotCfg.commands.ranges):
@@ -122,7 +122,7 @@ class Elf3RoughCfg( LeggedRobotCfg ):
             lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.5, 0.5]    # min max [rad/s]
             heading = [-3.14, 3.14]
-            height = [-0.71, 0.0]
+            height = [-0.61, 0.0]
 
     class asset( LeggedRobotCfg.asset ):
         file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/elf3_description/urdf/elf3.urdf'

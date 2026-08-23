@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "robot": "ELF3",
+  "task": "elf3",
+  "scope": "Nominal Isaac Gym Preview 4 simulation; not real-robot validation",
+  "checkpoint": {
+    "path": "HomieRL/pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.pt",
+    "metadata_path": "HomieRL/pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.json",
+    "iteration": 11400,
+    "size_bytes": 9504953,
+    "sha256": "085ce1758c2e65d7f0914ab2fcc6de16ba71eeda433f8eba550418638dcd6579",
+    "metadata_sha256": "0061ba8bba766378e8ab7d69a06b4f230f373295237808d29d45b18a3a50efcd"
+  },
+  "video": {
+    "path": "HomieRL/recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.mp4",
+    "size_bytes": 10350663,
+    "sha256": "8e1b4e8628ac353baaf6cc9a3101f43995026890a0291eedc4b25e0c67615667",
+    "codec": "h264",
+    "pixel_format": "yuv420p",
+    "resolution": [1280, 720],
+    "fps": 25,
+    "frames": 1263,
+    "duration_seconds": 50.52
+  },
+  "recording_metadata": {
+    "path": "HomieRL/recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.recording.json",
+    "size_bytes": 7211,
+    "sha256": "2b7cd8a52b66ad9f680db75c4a3bfc06bb3f9503430ccbc6fdd897511abd8499"
+  },
+  "contact_sheet": {
+    "path": "HomieRL/recordings/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z_contact_sheet.png",
+    "size_bytes": 826605,
+    "sha256": "a60574c7d417a8e503d683ff91f7b5aa25d4188e0ecf0fc7605ecb9c5d35a5b2"
+  },
+  "evaluation": {
+    "environment_resets": 0,
+    "terrain": "plane",
+    "upper_body": "fixed",
+    "noise_and_domain_randomization": "disabled",
+    "contact_termination": "disabled to avoid false-positive initial torso contact; any timeout, gravity termination, or environment reset still rejects the recording",
+    "sequence": [
+      "stand preparation",
+      "squat to 0.40 m",
+      "hold squat",
+      "rise to 1.01 m",
+      "forward",
+      "backward",
+      "left lateral",
+      "right lateral",
+      "left in-place yaw",
+      "right in-place yaw",
+      "final stand"
+    ],
+    "min_root_height_m": 0.487152636051178,
+    "max_root_height_m": 1.0660698413848877
+  },
+  "recorded_at_utc": "2026-08-23T16:32:57.866365Z",
+  "completed_at_utc": "2026-08-23T16:35:32.196810Z"
+}

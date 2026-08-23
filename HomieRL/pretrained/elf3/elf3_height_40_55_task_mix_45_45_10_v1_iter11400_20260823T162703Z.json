@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "robot": "ELF3",
+  "task": "elf3",
+  "evaluation_scope": "Isaac Gym simulation only; not real-robot validation",
+  "source_run": "HomieRL/legged_gym/logs/elf3_formal/Aug23_04-14-24_elf3_height_40_55_task_mix_45_45_10_v1",
+  "run_name": "elf3_height_40_55_task_mix_45_45_10_v1",
+  "task_distribution": {
+    "height_tracking": 0.45,
+    "velocity_tracking": 0.45,
+    "standing": 0.1
+  },
+  "height_sampling_bands": [
+    [0.4, 0.55, 0.5],
+    [0.55, 1.01, 0.5]
+  ],
+  "command_ranges": {
+    "lin_vel_x_mps": [-1.0, 1.0],
+    "lin_vel_y_mps": [-0.5, 0.5],
+    "ang_vel_yaw_radps": [-0.5, 0.5],
+    "height_m": [0.4, 1.01]
+  },
+  "iteration": 11400,
+  "checkpoint_path": "HomieRL/pretrained/elf3/elf3_height_40_55_task_mix_45_45_10_v1_iter11400_20260823T162703Z.pt",
+  "size_bytes": 9504953,
+  "sha256": "085ce1758c2e65d7f0914ab2fcc6de16ba71eeda433f8eba550418638dcd6579",
+  "training_run_started_at_utc": "2026-08-23T04:14:04Z",
+  "checkpoint_saved_at_utc": "2026-08-23T16:27:03.577292483Z",
+  "promoted_at_utc": "2026-08-23T16:29:28Z",
+  "training_base_commit": "7251f74f007a4fe5757692ad1b2f9ab4cf1a85f1",
+  "training_worktree_was_dirty": true,
+  "training_source_diff_sha256": "f8504c8aedf140037b6a6a2645da8ec354f901e0338866ff8553328f28c55223",
+  "elf3_config_sha256": "2bdd66f1e201ab28b6904c0631a97698eec02a2ec4bc5643d0400716e588d21f",
+  "recorder_sha256": "15051fb33941740f2916cfb535cf9065e028434e6125e6f61d4be20be2e4f7df",
+  "github_published_at_utc": null
+}
