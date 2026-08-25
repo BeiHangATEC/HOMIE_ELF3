@@ -1104,13 +1104,17 @@ class RobotStateMachine:
                 lines.append(f"  {source} --> {target}: {label}")
         return "\n".join(lines) + "\n"
 
-    @staticmethod
-    def _write_graph_file(path: str, content: str) -> None:
-        directory = os.path.dirname(path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as output:
-            output.write(content)
+    def _write_graph_file(self, path: str, content: str) -> None:
+        try:
+            directory = os.path.dirname(path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as output:
+                output.write(content)
+        except OSError as exc:
+            self._logger.warning(
+                f"state-machine graph export skipped for {path!r}: {exc}"
+            )
 
     @staticmethod
     def _mapping(value: object, context: str) -> Mapping[str, object]:

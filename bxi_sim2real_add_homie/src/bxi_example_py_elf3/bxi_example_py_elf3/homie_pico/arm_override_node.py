@@ -11,17 +11,30 @@ import rclpy
 from communication.msg import ActuatorCmds, ActuatorStates
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, qos_profile_sensor_data
-from sensor_msgs.msg import JointState
+from rclpy.signals import SignalHandlerOptions
+from sensor_msgs.msg import Imu, JointState
 from std_msgs.msg import Float32, String
 
 from bxi_example_py_elf3.policies.homie import HOMIE_PARAMETERS
 from bxi_example_py_elf3.policies.joints import ELF3_POLICY_JOINTS
 
 from .mixer import ARM_JOINTS, HEAD_JOINTS, HomiePicoArmMixer
+from .runtime_support import (
+    ArmGravityCompensator,
+    load_official_gravity,
+    load_official_gripper_types,
+)
 
 
 HEAD_KP = (16.747, 16.747)
 HEAD_KD = (1.066, 1.066)
+
+
+class _GripperContext:
+    """Small context surface required by the official GripperSession."""
+
+    def __init__(self, ros_node: Node) -> None:
+        self.ros_node = ros_node
 
 
 def _absolute_topic(value: str) -> str:
@@ -59,6 +72,27 @@ class HomiePicoArmOverrideNode(Node):
         self.declare_parameter("head_pitch_speed_rad_s", 1.5)
         self.declare_parameter("head_yaw_speed_rad_s", 2.0)
         self.declare_parameter("head_deadband_rad", 0.015)
+        self.declare_parameter("upper_body_mod_root", "")
+        self.declare_parameter("gravity_compensation_enabled", True)
+        self.declare_parameter("gravity_scale", 1.0)
+        self.declare_parameter("torque_limit_scale", 0.8)
+        self.declare_parameter("gravity_input_timeout_s", 0.5)
+        self.declare_parameter("hardware_gripper", False)
+        self.declare_parameter("gripper_left_bus", 5)
+        self.declare_parameter("gripper_right_bus", 6)
+        self.declare_parameter("gripper_can_id", 1)
+        self.declare_parameter("gripper_master_id", 17)
+        self.declare_parameter("gripper_kp", 10.0)
+        self.declare_parameter("gripper_kd", 0.5)
+        self.declare_parameter("gripper_calibration_speed_rad_s", 2.0)
+        self.declare_parameter("gripper_calibration_kp", 5.0)
+        self.declare_parameter("gripper_calibration_kd", 0.5)
+        self.declare_parameter("gripper_contact_torque", 0.5)
+        self.declare_parameter("gripper_abort_torque", 1.0)
+        self.declare_parameter("gripper_stopped_velocity_rad_s", 0.5)
+        self.declare_parameter("gripper_phase_timeout_s", 50.0)
+        self.declare_parameter("gripper_maximum_mos_temperature_c", 120)
+        self.declare_parameter("gripper_maximum_motor_temperature_c", 120)
 
         prefix = str(self.get_parameter("topic_prefix").value)
         state_topic = str(self.get_parameter("state_machine_info_topic").value)
@@ -73,6 +107,7 @@ class HomiePicoArmOverrideNode(Node):
             str(self.get_parameter("robot_state_topic").value)
         )
         actuator_state_topic = _prefix_topic(prefix, "actuator_states")
+        imu_topic = _prefix_topic(prefix, "imu_data")
         override_topic = _prefix_topic(prefix, "actuators_cmds_override")
 
         rate_hz = float(self.get_parameter("rate_hz").value)
@@ -118,6 +153,71 @@ class HomiePicoArmOverrideNode(Node):
             ),
         )
 
+        runtime_root = str(self.get_parameter("upper_body_mod_root").value).strip()
+        self._gravity = None
+        if bool(self.get_parameter("gravity_compensation_enabled").value):
+            model, effort_limits = load_official_gravity(runtime_root)
+            self._gravity = ArmGravityCompensator(
+                model,
+                effort_limits,
+                gravity_scale=float(self.get_parameter("gravity_scale").value),
+                torque_limit_scale=float(
+                    self.get_parameter("torque_limit_scale").value
+                ),
+                sample_timeout_s=float(
+                    self.get_parameter("gravity_input_timeout_s").value
+                ),
+            )
+
+        self._gripper = None
+        self._gripper_context = None
+        self._gripper_active = False
+        if bool(self.get_parameter("hardware_gripper").value):
+            if prefix.strip("/") != "hardware":
+                raise ValueError(
+                    "hardware_gripper may only be enabled with topic_prefix=hardware/"
+                )
+            config_type, session_type = load_official_gripper_types(runtime_root)
+            config = config_type(
+                enabled=True,
+                left_bus=int(self.get_parameter("gripper_left_bus").value),
+                right_bus=int(self.get_parameter("gripper_right_bus").value),
+                can_id=int(self.get_parameter("gripper_can_id").value),
+                master_id=int(self.get_parameter("gripper_master_id").value),
+                kp=float(self.get_parameter("gripper_kp").value),
+                kd=float(self.get_parameter("gripper_kd").value),
+                calibration_speed_rad_s=float(
+                    self.get_parameter("gripper_calibration_speed_rad_s").value
+                ),
+                calibration_kp=float(
+                    self.get_parameter("gripper_calibration_kp").value
+                ),
+                calibration_kd=float(
+                    self.get_parameter("gripper_calibration_kd").value
+                ),
+                contact_torque=float(
+                    self.get_parameter("gripper_contact_torque").value
+                ),
+                abort_torque=float(
+                    self.get_parameter("gripper_abort_torque").value
+                ),
+                stopped_velocity_rad_s=float(
+                    self.get_parameter("gripper_stopped_velocity_rad_s").value
+                ),
+                phase_timeout_s=float(
+                    self.get_parameter("gripper_phase_timeout_s").value
+                ),
+                maximum_mos_temperature_c=int(
+                    self.get_parameter("gripper_maximum_mos_temperature_c").value
+                ),
+                maximum_motor_temperature_c=int(
+                    self.get_parameter("gripper_maximum_motor_temperature_c").value
+                ),
+            )
+            self._gripper = session_type(config)
+            self._gripper_context = _GripperContext(self)
+            self._gripper.bind(self._gripper_context, self.get_logger())
+
         sensor_qos = QoSProfile(
             depth=1,
             durability=qos_profile_sensor_data.durability,
@@ -129,11 +229,18 @@ class HomiePicoArmOverrideNode(Node):
         self._robot_state_publisher = self.create_publisher(
             JointState, robot_state_topic, sensor_qos
         )
-        self._subscriptions = (
+        # Keep these references without shadowing rclpy.Node._subscriptions.
+        self._input_subscriptions = (
             self.create_subscription(
                 ActuatorStates,
                 actuator_state_topic,
                 self._actuator_state_callback,
+                sensor_qos,
+            ),
+            self.create_subscription(
+                Imu,
+                imu_topic,
+                self._imu_callback,
                 sensor_qos,
             ),
             self.create_subscription(
@@ -156,12 +263,19 @@ class HomiePicoArmOverrideNode(Node):
         self._override_active = False
         self._invalid_reference_warned = False
         self._invalid_state_warned = False
+        self._gravity_stale_warned = False
+        self._state_name = ""
+        self._state_received_at: float | None = None
+        self._target_state = str(self.get_parameter("target_state").value)
+        self._state_timeout_s = float(self.get_parameter("state_timeout_s").value)
         self._last_tick = time.monotonic()
         self._timer = self.create_timer(1.0 / rate_hz, self._tick)
         self.get_logger().info(
             "HOMIE PICO override ready: "
             f"state={state_topic}, feedback={actuator_state_topic}, "
-            f"reference={reference_topic}, output={override_topic}"
+            f"imu={imu_topic}, reference={reference_topic}, output={override_topic}, "
+            f"gravity={'on' if self._gravity is not None else 'off'}, "
+            f"gripper={'on' if self._gripper is not None else 'off'}"
         )
 
     def _actuator_state_callback(self, message: ActuatorStates) -> None:
@@ -178,6 +292,13 @@ class HomiePicoArmOverrideNode(Node):
             return
         if not np.isfinite(position).all():
             return
+        if self._gravity is not None:
+            try:
+                self._gravity.observe_joint_state(
+                    names, position, received_at=time.monotonic()
+                )
+            except ValueError:
+                pass
         velocity = np.asarray(message.velocity, dtype=np.float64)
         if velocity.shape != position.shape or not np.isfinite(velocity).all():
             velocity = np.zeros_like(position)
@@ -188,6 +309,18 @@ class HomiePicoArmOverrideNode(Node):
         output.velocity = velocity.tolist()
         self._robot_state_publisher.publish(output)
         self._head_supported = all(name in names for name in HEAD_JOINTS)
+
+    def _imu_callback(self, message: Imu) -> None:
+        if self._gravity is None:
+            return
+        orientation = message.orientation
+        try:
+            self._gravity.observe_orientation_xyzw(
+                (orientation.x, orientation.y, orientation.z, orientation.w),
+                received_at=time.monotonic(),
+            )
+        except ValueError:
+            return
 
     def _reference_callback(self, message: JointState) -> None:
         try:
@@ -237,7 +370,20 @@ class HomiePicoArmOverrideNode(Node):
                 )
                 self._invalid_state_warned = True
             return
+        now = time.monotonic()
+        self._state_name = state_name
+        self._state_received_at = now
+        self._set_gripper_active(state_name == self._target_state)
         self._invalid_state_warned = False
+
+    def _set_gripper_active(self, active: bool) -> None:
+        if self._gripper is None or active == self._gripper_active:
+            return
+        if active:
+            self._gripper.enter()
+        else:
+            self._gripper.exit()
+        self._gripper_active = active
 
     def _publish_release(self) -> None:
         message = ActuatorCmds()
@@ -250,12 +396,41 @@ class HomiePicoArmOverrideNode(Node):
         dt = min(max(0.0, now - self._last_tick), 0.1)
         self._last_tick = now
         command = self._mixer.step(now=now, dt=dt)
+        state_live = (
+            self._state_name == self._target_state
+            and self._state_received_at is not None
+            and 0.0 <= now - self._state_received_at <= self._state_timeout_s
+        )
+        self._set_gripper_active(state_live)
+        if self._gripper_active:
+            self._gripper.update(dt)
         if command is None:
             if self._override_active:
                 self._publish_release()
                 self._override_active = False
                 self.get_logger().info("HOMIE PICO upper-body override released")
             return
+
+        arm_torque = np.zeros(len(ARM_JOINTS), dtype=np.float32)
+        if self._gravity is not None:
+            try:
+                gravity_torque = self._gravity.compute(now=now)
+            except ValueError as exc:
+                gravity_torque = None
+                if not self._gravity_stale_warned:
+                    self.get_logger().error(f"invalid arm gravity compensation: {exc}")
+            if gravity_torque is None:
+                if not self._gravity_stale_warned:
+                    self.get_logger().warning(
+                        "HOMIE PICO override waiting for fresh arm and IMU feedback"
+                    )
+                    self._gravity_stale_warned = True
+                if self._override_active:
+                    self._publish_release()
+                    self._override_active = False
+                return
+            arm_torque[:] = gravity_torque
+            self._gravity_stale_warned = False
 
         names = list(ARM_JOINTS)
         position = command.arm_position.tolist()
@@ -275,7 +450,9 @@ class HomiePicoArmOverrideNode(Node):
         message.kp = kp
         message.kd = kd
         message.vel = [0.0] * len(names)
-        message.torque = [0.0] * len(names)
+        message.torque = arm_torque.tolist() + [0.0] * (
+            len(names) - len(ARM_JOINTS)
+        )
         self._override_publisher.publish(message)
         if not self._override_active:
             self._override_active = True
@@ -284,6 +461,9 @@ class HomiePicoArmOverrideNode(Node):
             )
 
     def destroy_node(self) -> bool:
+        self._set_gripper_active(False)
+        if self._gripper is not None and self._gripper_context is not None:
+            self._gripper.unbind(self._gripper_context)
         if self._override_active:
             self._publish_release()
             self._override_active = False
@@ -291,14 +471,16 @@ class HomiePicoArmOverrideNode(Node):
 
 
 def main(args=None) -> None:
-    rclpy.init(args=args)
-    node = HomiePicoArmOverrideNode()
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    node = None
     try:
+        node = HomiePicoArmOverrideNode()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
+        if node is not None:
+            node.destroy_node()
         rclpy.try_shutdown()
 
 

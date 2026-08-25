@@ -62,6 +62,20 @@ def declare_homie_pico_arguments(*, start_video_default: bool) -> list:
         DeclareLaunchArgument("arm_gain_ramp_s", default_value="0.4"),
         DeclareLaunchArgument("grip_threshold", default_value="0.5"),
         DeclareLaunchArgument("reference_timeout_s", default_value="0.5"),
+        DeclareLaunchArgument("gravity_compensation_enabled", default_value="true"),
+        DeclareLaunchArgument("gravity_scale", default_value="1.0"),
+        DeclareLaunchArgument("torque_limit_scale", default_value="0.8"),
+        DeclareLaunchArgument("gravity_input_timeout_s", default_value="0.5"),
+        DeclareLaunchArgument(
+            "hardware_gripper",
+            default_value="false",
+            description=(
+                "Enable official CANFD gripper calibration/control. Hardware only; "
+                "keep false until buses and emergency stop are verified."
+            ),
+        ),
+        DeclareLaunchArgument("gripper_left_bus", default_value="5"),
+        DeclareLaunchArgument("gripper_right_bus", default_value="6"),
     ]
 
 
@@ -106,7 +120,10 @@ def _runtime_processes(context):
             ],
             name="homie_pico_manager",
             output="screen",
-            additional_env={"PYTHONUNBUFFERED": "1"},
+            additional_env={
+                "PYTHONUNBUFFERED": "1",
+                "SONIC_PICO_PYTHON": LaunchConfiguration("arm_ik_python"),
+            },
         ),
         ExecuteProcess(
             cmd=[
@@ -215,6 +232,11 @@ def homie_pico_actions(*, topic_prefix: str) -> list:
                 {"topic_prefix": topic_prefix},
                 {"state_machine_info_topic": state_topic},
                 {"target_state": "com.bxi.homie/homie"},
+                {
+                    "upper_body_mod_root": ParameterValue(
+                        LaunchConfiguration("upper_body_mod_root"), value_type=str
+                    )
+                },
                 {"reference_topic": LaunchConfiguration("reference_topic")},
                 {"robot_state_topic": LaunchConfiguration("robot_state_topic")},
                 {
@@ -235,6 +257,42 @@ def homie_pico_actions(*, topic_prefix: str) -> list:
                 {
                     "reference_timeout_s": ParameterValue(
                         LaunchConfiguration("reference_timeout_s"), value_type=float
+                    )
+                },
+                {
+                    "gravity_compensation_enabled": ParameterValue(
+                        LaunchConfiguration("gravity_compensation_enabled"),
+                        value_type=bool,
+                    )
+                },
+                {
+                    "gravity_scale": ParameterValue(
+                        LaunchConfiguration("gravity_scale"), value_type=float
+                    )
+                },
+                {
+                    "torque_limit_scale": ParameterValue(
+                        LaunchConfiguration("torque_limit_scale"), value_type=float
+                    )
+                },
+                {
+                    "gravity_input_timeout_s": ParameterValue(
+                        LaunchConfiguration("gravity_input_timeout_s"), value_type=float
+                    )
+                },
+                {
+                    "hardware_gripper": ParameterValue(
+                        LaunchConfiguration("hardware_gripper"), value_type=bool
+                    )
+                },
+                {
+                    "gripper_left_bus": ParameterValue(
+                        LaunchConfiguration("gripper_left_bus"), value_type=int
+                    )
+                },
+                {
+                    "gripper_right_bus": ParameterValue(
+                        LaunchConfiguration("gripper_right_bus"), value_type=int
                     )
                 },
             ],
