@@ -63,6 +63,23 @@ ros2 topic echo /simulation/state_machine_info std_msgs/msg/String --field data 
 
 真机首次测试必须使用吊架或等效保护，清空双臂运动范围并保持急停可达。没有现场明确允许时，不要启动下列硬件 launch。`robot_config.yaml` 不是必需项：文件不存在时硬件 launch 使用工程内置默认值；当前机器应先保持头部和夹爪关闭。
 
+硬件 launch 已经运行时，先在第二个终端执行只读预检。该命令不发布控制指令，也不改变电机状态：
+
+```bash
+cd /home/bxi/bxi_wsm/bxi_sim2real_add_homie
+source /opt/ros/humble/setup.bash
+source /opt/bxi/bxi_ros2_pkg/setup.bash
+source install/setup.bash
+sudo -H env \
+  BXI_UPPER_BODY_MOD_ROOT=/home/bxi/bxi_wsm/homie_pico_runtime/com.bxi.upper_body_teleop \
+  BXI_ARM_IK_PYTHON=/home/bxi/bxi_lj/bxi_pnlink_wholebody_teleop/.venv_teleop/bin/python \
+  ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}" \
+  /home/bxi/bxi_wsm/bxi_sim2real_add_homie/install/lib/bxi_example_py_elf3/homie_pico_hw_preflight \
+  --duration 5 --motor-recv-mask 0x603FFFFF
+```
+
+把 `--motor-recv-mask` 替换为本次硬件启动日志中最后一条 `motor_timeout` 后的十六进制数。虽然日志标签叫 `motor_timeout`，底层实际打印的是 `get_motor_recv_flag()` 的已收到反馈位图。`0x603FFFFF` 表示腰、双腿和左臂均已收到反馈，仅右臂 `can4` 的 7 个电机缺失；`0x60000000` 是禁用的两个头部位。腿部反馈存在时可以继续定位“无法站立”的控制链，但双臂 PICO 动作测试要求预检 JSON 的 `static.ready`、`ros.ready` 和 `motor_receive.ready` 全部为 `true`。
+
 ```bash
 sudo -H env \
   BXI_UPPER_BODY_MOD_ROOT=/home/bxi/bxi_wsm/homie_pico_runtime/com.bxi.upper_body_teleop \
@@ -81,6 +98,6 @@ sudo -H env \
 
 真机覆盖话题为 `/hardware/actuators_cmds_override`。控制器在消息超过 0.2 秒未刷新时自动释放，在 zero-torque 状态下无条件忽略覆盖。重力补偿要求 `/hardware/actuator_states` 和 `/hardware/imu_data` 都持续新鲜，否则不会接管手臂。
 
-首次只验收站立、进入 HOMIE、单臂小幅接管、松 grip 回退、断开 PICO 回退、退出 HOMIE 和急停。此前日志中的 `motor_timeout: 0x603FFFFF` 不只是 can4 单臂告警；在底层 CAN/IMU 状态恢复前不要继续 PICO 真机动作测试。
+首次只验收站立、进入 HOMIE、单臂小幅接管、松 grip 回退、断开 PICO 回退、退出 HOMIE 和急停。即使 `0x603FFFFF` 只定位到右臂 `can4`，若预检看不到持续的 `/hardware/actuator_states`、`/hardware/imu_data`、`/hardware/state_machine_info` 或 `/hardware/actuators_cmds`，也不要继续 PICO 真机动作测试。
 
 夹爪默认关闭。确认左右夹爪确实位于 CANFD bus 5/6，并准备好限位校准后，才可在吊架测试中显式增加 `hardware_gripper:=true`；进入 HOMIE 后它会自动驱动夹爪寻找机械限位。头部硬件确认后再改为 `enable_head:=true`。

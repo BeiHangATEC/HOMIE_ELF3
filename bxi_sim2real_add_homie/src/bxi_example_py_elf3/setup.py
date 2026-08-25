@@ -260,6 +260,7 @@ setup(
             "bxi_example_py_elf3_mjlab = bxi_example_py_elf3.bxi_example_mjlab:main",
             "bxi_example_py_elf3_demo = bxi_example_py_elf3.bxi_example_demo:main",
             "homie_pico_arm_override = bxi_example_py_elf3.homie_pico.arm_override_node:main",
+            "homie_pico_hw_preflight = bxi_example_py_elf3.homie_pico.hardware_preflight:main",
         ],
     },
 )
