@@ -1,11 +1,25 @@
 import numpy as np
 import pytest
 
+from bxi_example_py_elf3.homie_pico.arm_override_node import _teleop_arm_gains
 from bxi_example_py_elf3.homie_pico.mixer import (
     ARM_JOINTS,
     HEAD_JOINTS,
     HomiePicoArmMixer,
 )
+
+
+def test_teleop_arm_gains_are_selected_by_joint_name():
+    kp, kd = _teleop_arm_gains(1.0)
+
+    np.testing.assert_allclose(
+        kp,
+        [54.224, 54.224, 16.747, 54.224, 16.747, 16.747, 16.747] * 2,
+    )
+    np.testing.assert_allclose(
+        kd,
+        [3.452, 3.452, 1.066, 3.452, 1.066, 1.066, 1.066] * 2,
+    )
 
 
 TARGET_STATE = "com.bxi.homie/homie"

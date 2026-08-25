@@ -59,7 +59,14 @@ def declare_homie_pico_arguments(*, start_video_default: bool) -> list:
         DeclareLaunchArgument("reference_topic", default_value="pico_control_joint_commands"),
         DeclareLaunchArgument("robot_state_topic", default_value="pico_control_joint_states"),
         DeclareLaunchArgument("head_control_enabled", default_value="true"),
-        DeclareLaunchArgument("arm_gain_ramp_s", default_value="0.4"),
+        DeclareLaunchArgument(
+            "arm_gain_ramp_s",
+            default_value="1.0",
+            description=(
+                "Per-arm takeover/release ramp. HOMIE crouch uses a slower "
+                "default than the standing upper-body teleop state."
+            ),
+        ),
         DeclareLaunchArgument("grip_threshold", default_value="0.5"),
         DeclareLaunchArgument("reference_timeout_s", default_value="0.5"),
         DeclareLaunchArgument("gravity_compensation_enabled", default_value="true"),

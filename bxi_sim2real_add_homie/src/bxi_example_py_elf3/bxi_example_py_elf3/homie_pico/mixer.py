@@ -57,7 +57,7 @@ class HomiePicoArmMixer:
         reference_timeout_s: float = 0.5,
         grip_timeout_s: float = 0.5,
         grip_threshold: float = 0.5,
-        arm_gain_ramp_s: float = 0.4,
+        arm_gain_ramp_s: float = 1.0,
         head_control_enabled: bool = True,
         head_pitch_limit_rad: float = 0.5,
         head_yaw_limit_rad: float = 1.0,

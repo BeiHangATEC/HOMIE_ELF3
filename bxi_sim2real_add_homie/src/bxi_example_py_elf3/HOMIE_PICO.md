@@ -1,6 +1,6 @@
 # HOMIE 下蹲 + PICO 上身遥操作
 
-该组合保留 `com.bxi.homie/homie` 作为腰腿和高度控制源，只在最终电机命令层按关节名覆盖双臂。接管期间使用官方 ELF3 双臂重力模型产生限幅前馈；PICO 或状态机信息断流时，覆盖层先回到 HOMIE 的手臂 PD 目标，再显式释放。zero-torque 状态始终拒绝覆盖。
+该组合保留 `com.bxi.homie/homie` 作为腰腿和高度控制源，只在最终电机命令层按关节名覆盖双臂。移动手臂使用官方 ELF3 上身遥操作增益，而不是 HOMIE 用来固定手臂的高刚度增益；接管默认用 1 秒渐变，并使用官方双臂重力模型产生限幅前馈。PICO 或状态机信息断流时，覆盖层先回到 HOMIE 的手臂 PD 目标，再显式释放。zero-torque 状态始终拒绝覆盖。
 
 PICO 接入和 Pinocchio IK 直接运行官方 [`com.bxi.upper_body_teleop`](https://github.com/konodoki/com.bxi.upper_body_teleop) 代码，其 XRoboToolkit 资产来自官方 [`com.bxi.sonic`](https://github.com/konodoki/com.bxi.sonic)。不要把这两个仓库放入 `/opt/bxi/mods`，否则官方半身遥操状态会被同时加载并与本组合重复启动 PICO 端口。
 

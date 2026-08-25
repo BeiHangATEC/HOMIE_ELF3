@@ -16,7 +16,10 @@ from sensor_msgs.msg import Imu, JointState
 from std_msgs.msg import Float32, String
 
 from bxi_example_py_elf3.policies.homie import HOMIE_PARAMETERS
-from bxi_example_py_elf3.policies.joints import ELF3_POLICY_JOINTS
+from bxi_example_py_elf3.policies.joints import (
+    ELF3_ISAAC_PARAMETERS,
+    ELF3_POLICY_JOINTS,
+)
 
 from .mixer import ARM_JOINTS, HEAD_JOINTS, HomiePicoArmMixer
 from .runtime_support import (
@@ -49,6 +52,19 @@ def _prefix_topic(prefix: str, suffix: str) -> str:
     return _absolute_topic(f"{normalized}/{suffix}" if normalized else suffix)
 
 
+def _teleop_arm_gains(kp_scale: float) -> tuple[np.ndarray, np.ndarray]:
+    """Select official upper-body gains by name across differing layouts."""
+
+    indices = np.asarray(
+        [ELF3_ISAAC_PARAMETERS.layout.index(name) for name in ARM_JOINTS],
+        dtype=np.intp,
+    )
+    return (
+        ELF3_ISAAC_PARAMETERS.kp[indices] * float(kp_scale),
+        ELF3_ISAAC_PARAMETERS.kd[indices].copy(),
+    )
+
+
 class HomiePicoArmOverrideNode(Node):
     """Publish named arm overrides only while the controller is in HOMIE."""
 
@@ -64,7 +80,7 @@ class HomiePicoArmOverrideNode(Node):
         self.declare_parameter("reference_timeout_s", 0.5)
         self.declare_parameter("grip_timeout_s", 0.5)
         self.declare_parameter("grip_threshold", 0.5)
-        self.declare_parameter("arm_gain_ramp_s", 0.4)
+        self.declare_parameter("arm_gain_ramp_s", 1.0)
         self.declare_parameter("arm_kp_scale", 1.0)
         self.declare_parameter("head_control_enabled", True)
         self.declare_parameter("head_pitch_limit_rad", 0.5)
@@ -121,11 +137,15 @@ class HomiePicoArmOverrideNode(Node):
             [ELF3_POLICY_JOINTS.index(name) for name in ARM_JOINTS],
             dtype=np.intp,
         )
+        arm_kp, arm_kd = _teleop_arm_gains(arm_kp_scale)
         self._mixer = HomiePicoArmMixer(
             target_state=str(self.get_parameter("target_state").value),
             nominal_arm_position=HOMIE_PARAMETERS.default_position[arm_indices],
-            arm_kp=HOMIE_PARAMETERS.kp[arm_indices] * arm_kp_scale,
-            arm_kd=HOMIE_PARAMETERS.kd[arm_indices],
+            # HOMIE's arm gains hold a fixed training pose and are too stiff
+            # for a moving operator reference. Reuse the official ELF3
+            # upper-body policy gains for teleoperation instead.
+            arm_kp=arm_kp,
+            arm_kd=arm_kd,
             state_timeout_s=float(self.get_parameter("state_timeout_s").value),
             reference_timeout_s=float(
                 self.get_parameter("reference_timeout_s").value
