@@ -1,0 +1,86 @@
+schema: 1
+id: com.bxi.homie
+name: HOMIE 下蹲行走
+version: 1.0.0
+api: ">=4,<5"
+enable: true
+entrypoint: plugin:create_mod
+visibility: public
+requires:
+  - id: com.bxi.basic_actions
+    version: ">=1,<2"
+conflicts: []
+python_exports: []
+runtime_requirements:
+  python:
+    - import: onnxruntime
+  ros: []
+  system: []
+
+events:
+  toggle:
+    slot: btn_10
+    value: 13
+
+speed_profiles:
+  homie:
+    vx_scale: 0.5
+    vx_min: -0.5
+    vx_max: 0.5
+    vy_scale: 0.5
+    vy_min: -0.5
+    vy_max: 0.5
+    yaw_scale: 0.5
+    yaw_min: -0.5
+    yaw_max: 0.5
+
+transition_profiles:
+  safe_running_blend:
+    type: running_blend
+    duration: 0.6
+    curve: smootherstep
+    sample_from: true
+    sample_to: true
+    advance_from: true
+    advance_to: false
+
+states:
+  homie:
+    manifest:
+      label: HOMIE 下蹲行走
+      priority: 910
+      group: Advanced
+      icon: accessibility_new
+      confirm: true
+      confirm_message: 请确保机器人周围没有障碍物并保持急停可用
+    speed_profile: homie
+
+routes:
+  - from: com.bxi.basic_actions/normal
+    event: toggle
+    to: homie
+    transition: safe_running_blend
+
+  - from: com.bxi.basic_actions/pd_brake
+    event: toggle
+    to: homie
+    transition: safe_running_blend
+
+  - from: homie
+    event: toggle
+    to: com.bxi.basic_actions/normal
+    transition: safe_running_blend
+
+  - from: homie
+    event: com.bxi.basic_actions/normal
+    to: com.bxi.basic_actions/normal
+    transition: safe_running_blend
+
+  - from: homie
+    event: com.bxi.basic_actions/pd_brake
+    to: com.bxi.basic_actions/pd_brake
+    transition: safe_running_blend
+
+  - from: homie
+    event: com.bxi.basic_actions/zero_torque
+    to: com.bxi.basic_actions/zero_torque
