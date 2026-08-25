@@ -41,6 +41,8 @@ ros2 launch bxi_example_py_elf3 example_homie_pico_sim.launch.py \
   arm_ik_python:=/home/bxi/bxi_lj/bxi_pnlink_wholebody_teleop/.venv_teleop/bin/python
 ```
 
+组合 launch 默认同时启动 `remote_controller`，手柄就绪后其终端应显示 `input candidate ready; accepting commands: gamepad`。如果外部已经运行遥控器节点，增加 `start_remote_controller:=false`，避免两个进程同时读取同一个设备。
+
 如果先验证命令合成而不启动 PICO，可使用：
 
 ```bash
@@ -95,6 +97,8 @@ sudo -H env \
       enable_head:=false start_video_runtime:=false hardware_gripper:=false
   '
 ```
+
+该组合 launch 默认包含 `remote_controller`。采用默认方式时不要再单独启动第二个遥控器节点，也不要按手柄 `Start/Menu` 重新拉起硬件；若现场统一使用已有遥控器进程，则在上面的命令中增加 `start_remote_controller:=false`。
 
 真机覆盖话题为 `/hardware/actuators_cmds_override`。控制器在消息超过 0.2 秒未刷新时自动释放，在 zero-torque 状态下无条件忽略覆盖。重力补偿要求 `/hardware/actuator_states` 和 `/hardware/imu_data` 都持续新鲜，否则不会接管手臂。
 

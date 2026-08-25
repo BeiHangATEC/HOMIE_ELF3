@@ -22,6 +22,7 @@
   <exec_depend>bxi_depth_camera</exec_depend>
   <exec_depend>hardware_elf3</exec_depend>
   <exec_depend>mujoco</exec_depend>
+  <exec_depend>remote_controller</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

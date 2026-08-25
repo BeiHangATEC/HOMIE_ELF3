@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 
+from ament_index_python.packages import get_package_share_path
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
@@ -42,6 +43,15 @@ def declare_homie_pico_arguments(*, start_video_default: bool) -> list:
             "start_video_runtime",
             default_value="true" if start_video_default else "false",
         ),
+        DeclareLaunchArgument(
+            "start_remote_controller",
+            default_value="true",
+            description=(
+                "Start the workspace remote_controller with the Battle Dragon "
+                "mapping. Set false when one is already running."
+            ),
+        ),
+        DeclareLaunchArgument("remote_debug", default_value="false"),
         DeclareLaunchArgument("pico_host", default_value="127.0.0.1"),
         DeclareLaunchArgument("pico_port", default_value="5556"),
         DeclareLaunchArgument("pico_topic", default_value="pose"),
@@ -83,6 +93,34 @@ def declare_homie_pico_arguments(*, start_video_default: bool) -> list:
         ),
         DeclareLaunchArgument("gripper_left_bus", default_value="5"),
         DeclareLaunchArgument("gripper_right_bus", default_value="6"),
+    ]
+
+
+def _remote_controller_actions(context):
+    if not _as_bool(
+        LaunchConfiguration("start_remote_controller").perform(context),
+        name="start_remote_controller",
+    ):
+        return []
+
+    config = get_package_share_path("remote_controller") / "config/xbox_default.yaml"
+    if not config.is_file():
+        raise RuntimeError(f"remote controller config is missing: {config}")
+    arguments = ["--config", str(config), "__log_level:=debug"]
+    if _as_bool(
+        LaunchConfiguration("remote_debug").perform(context),
+        name="remote_debug",
+    ):
+        arguments.append("--DEBUG")
+    return [
+        Node(
+            package="remote_controller",
+            executable="remote_controller",
+            name="remote_controller",
+            output="screen",
+            arguments=arguments,
+            emulate_tty=True,
+        )
     ]
 
 
@@ -305,6 +343,7 @@ def homie_pico_actions(*, topic_prefix: str) -> list:
             ],
             emulate_tty=True,
         ),
+        OpaqueFunction(function=_remote_controller_actions),
         OpaqueFunction(function=_runtime_processes),
     ]
 
