@@ -1,0 +1,320 @@
+schema: 1
+id: com.bxi.upper_body_teleop
+name: PICO半身遥操
+version: 1.2.5
+api: ">=4,<5"
+enable: true
+entrypoint: plugin:create_mod
+visibility: protected
+requires:
+  - id: com.bxi.basic_actions
+    version: ">=1,<2"
+  # Reuse the deployed XRoboToolkit and RTSP runtime bundle without copying
+  # hundreds of megabytes into this independent feature Mod.
+  - id: com.bxi.sonic
+    version: ">=1.3,<2"
+conflicts: []
+python_exports: []
+runtime_requirements:
+  python: []
+  ros:
+    - package: rclpy
+    - package: sensor_msgs
+    - package: std_msgs
+    - package: communication
+  system: []
+
+runtime_profiles:
+  host_ros:
+    mode: host
+
+nodes:
+  mediamtx_server:
+    runtime: command
+    entrypoint: shared_runtime_launcher.py
+    interpreter: python3
+    runtime_profile: host_ros
+    execution: process
+    lifecycle: state
+    states: [upper_body_teleop]
+    arguments: [mediamtx]
+    environment:
+      PYTHONUNBUFFERED: "1"
+    scheduling:
+      cpu_affinity: background
+    manifest:
+      label: 半身遥操头部相机RTSP服务器
+    runtime_requirements:
+      python: []
+      ros: []
+      system: []
+    restart:
+      max_attempts: 3
+      delay: 1.0
+      non_retryable_exit_codes: [64, 78]
+    shutdown:
+      signal: SIGINT
+      terminate_after: 2.0
+      kill_after: 4.0
+
+  head_camera_rtsp:
+    runtime: command
+    entrypoint: shared_runtime_launcher.py
+    interpreter: python3
+    runtime_profile: host_ros
+    execution: process
+    lifecycle: state
+    states: [upper_body_teleop]
+    depends_on: [mediamtx_server]
+    arguments:
+      - camera
+      - --ros-args
+      - -p
+      - simulation_topic:=/simulation/head_depth_camera/color/image_raw
+      - -p
+      - hardware_topic:=/hardware/head_depth_camera/color/image_raw
+      - -p
+      - source_mode:=auto
+      - -p
+      - source_timeout_s:=0.5
+      - -p
+      - hardware_promote_frames:=3
+      - -p
+      - rtsp_url:=rtsp://127.0.0.1:2212/video
+      - -p
+      - readiness_host:=127.0.0.1
+      - -p
+      - readiness_port:=2212
+      - -p
+      - rtsp_transport:=udp
+      - -p
+      - encoder:=libx264
+      - -p
+      - output_width:=424
+      - -p
+      - output_height:=240
+      - -p
+      - output_fps:=60
+      - -p
+      - bitrate:=3000000
+      - -p
+      - gop_size:=15
+      - -p
+      - network_timeout_s:=2.0
+      - -p
+      - statistics_interval_s:=5.0
+    environment:
+      PYTHONUNBUFFERED: "1"
+    scheduling:
+      cpu_affinity: background
+    manifest:
+      label: 半身遥操头部相机RTSP推流器
+    runtime_requirements:
+      python: []
+      ros:
+        - package: rclcpp
+        - package: sensor_msgs
+      system:
+        - library: avcodec
+        - library: avformat
+        - library: avutil
+        - library: swscale
+        - library: x264
+    restart:
+      max_attempts: 3
+      delay: 1.0
+      non_retryable_exit_codes: [64, 78]
+    shutdown:
+      signal: SIGINT
+      terminate_after: 3.0
+      kill_after: 5.0
+
+  pico_manager:
+    runtime: command
+    entrypoint: shared_runtime_launcher.py
+    interpreter: python3
+    runtime_profile: host_ros
+    execution: process
+    lifecycle: state
+    states: [upper_body_teleop]
+    arguments:
+      - pico-manager
+      - --num_frames_to_send
+      - "10"
+      - --target_fps
+      - "50"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    scheduling:
+      cpu_affinity: background
+    manifest:
+      label: 半身遥操PICO管理器
+    runtime_requirements:
+      python: []
+      ros: []
+      system: []
+    restart:
+      max_attempts: 3
+      delay: 3.0
+      non_retryable_exit_codes: [78]
+    shutdown:
+      signal: SIGINT
+      terminate_after: 3.0
+      kill_after: 5.0
+
+  arm_ik_bridge:
+    runtime: command
+    entrypoint: arm_bridge_launcher.py
+    interpreter: python3
+    runtime_profile: host_ros
+    execution: process
+    lifecycle: state
+    states: [upper_body_teleop]
+    depends_on: [pico_manager]
+    arguments:
+      - --pico-host
+      - 127.0.0.1
+      - --pico-port
+      - "5556"
+      - --pico-topic
+      - pose
+      - --robot-state-topic
+      - pico_control_joint_states
+      - --reference-topic
+      - pico_control_joint_commands
+      - --rate-hz
+      - "50.0"
+      - --stale-timeout-s
+      - "0.5"
+      - --required-consecutive-frames
+      - "3"
+      - --ik-iterations
+      - "24"
+      - --ik-damping
+      - "0.001"
+      - --ik-step-size
+      - "0.7"
+      - --ik-tolerance
+      - "0.0001"
+      - --maximum-position-error-m
+      - "0.003"
+      - --maximum-orientation-error-rad
+      - "0.03"
+      - --maximum-joint-step-rad
+      - "0.12"
+      - --joint-limit-margin-rad
+      - "0.0"
+      - --joint-centering-gain
+      - "0.005"
+      - --swivel-continuity-gain
+      - "0.02"
+      - --swivel-min-radius-m
+      - "0.02"
+    scheduling:
+      cpu_affinity: background
+    manifest:
+      label: Pinocchio双臂解算桥
+    runtime_requirements:
+      python: []
+      ros: []
+      system: []
+    restart:
+      max_attempts: 3
+      delay: 1.0
+      non_retryable_exit_codes: [64, 78]
+    shutdown:
+      signal: SIGINT
+      terminate_after: 2.0
+      kill_after: 4.0
+
+events:
+  activate:
+    slot: btn_10
+    value: 17
+
+speed_profiles:
+  walk:
+    vx_scale: 1.0
+    vx_min: -1.0
+    vx_max: 1.0
+    vy_scale: 0.5
+    yaw_scale: 1.5
+
+states:
+  upper_body_teleop:
+    speed_profile: walk
+    params:
+      reference_topic: pico_control_joint_commands
+      robot_state_topic: pico_control_joint_states
+      live_reference_timeout_s: 0.5
+      grip_threshold: 0.5
+      arm_gain_ramp_s: 0.4
+      arm_kp_scale: 1.0
+      gravity_scale: 1.0
+      torque_limit_scale: 0.8
+      friction_coulomb: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      friction_viscous: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      friction_smoothing_velocity: 0.1
+      head_control_enabled: true
+      head_pitch_limit_rad: 0.5
+      head_yaw_limit_rad: 1.0
+      head_pitch_speed_rad_s: 1.5
+      head_yaw_speed_rad_s: 2.0
+      head_deadband_rad: 0.015
+      hardware_gripper: true
+      gripper_enable_interval_s: 1.0
+      gripper_left_bus: 5
+      gripper_right_bus: 6
+      gripper_can_id: 1
+      gripper_master_id: 17
+      gripper_kp: 10.0
+      gripper_kd: 0.5
+      gripper_calibration_speed_rad_s: 2.0
+      gripper_calibration_kp: 5.0
+      gripper_calibration_kd: 0.5
+      gripper_contact_torque: 0.5
+      gripper_abort_torque: 1.0
+      gripper_contact_confirm_s: 0.25
+      gripper_stopped_velocity_rad_s: 0.5
+      gripper_tracking_error_rad: 0.08
+      gripper_limit_margin_rad: 0.15
+      gripper_minimum_span_rad: 1.0
+      gripper_maximum_search_travel_rad: 7.0
+      gripper_response_timeout_s: 1.0
+      gripper_feedback_timeout_s: 0.3
+      gripper_phase_timeout_s: 50.0
+      gripper_maximum_mos_temperature_c: 120
+      gripper_maximum_motor_temperature_c: 120
+    manifest:
+      label: PICO半身遥操
+      priority: 845
+      group: Advanced
+      icon: accessibility_new
+      confirm: true
+      confirm_message: >-
+        进入后下半身保持步态控制，双臂默认保持PD站立姿态；PICO完成ABXY校准后自动输出姿态，握紧对应grip才接管该侧手臂。首次测试必须使用吊架并保持急停可达。
+
+routes:
+  - from: com.bxi.basic_actions/normal
+    event: activate
+    to: upper_body_teleop
+    # Commit immediately so releasing LB+LT+X cannot briefly become the
+    # existing LB+X dance command while this route still considers normal the
+    # source state. Arm takeover remains continuous through arm_gain_ramp_s.
+    transition: instant
+  - from: upper_body_teleop
+    event: com.bxi.basic_actions/normal
+    to: com.bxi.basic_actions/normal
+    transition:
+      profile: dual_running_blend
+      duration: 0.8
+  - from: upper_body_teleop
+    event: com.bxi.basic_actions/pd_brake
+    to: com.bxi.basic_actions/pd_brake
+  - from: upper_body_teleop
+    event: com.bxi.basic_actions/zero_torque
+    to: com.bxi.basic_actions/zero_torque
+  - from: upper_body_teleop
+    event: com.bxi.basic_actions/recover
+    to: com.bxi.basic_actions/recover
+    transition: soft_switch

@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+*.rknn.build.lock
+.pytest_cache/
+*.log
+MUJOCO_LOG.TXT
